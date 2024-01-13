@@ -1,0 +1,3 @@
+port = 8080
+ip = [ 127, 0, 0, 1 ]
+wed_domains = [ 'http://localhost:5173' ]
