@@ -52,6 +52,7 @@ use futures_util::{
     stream::{SplitSink, SplitStream, StreamExt},
 };
 use rand::Rng;
+use tower_http::cors::Any;
 
 use crate::constants::constants::NB_LOBBIES;
 
@@ -140,15 +141,15 @@ async fn main() {
         .layer(
             CorsLayer::new()
                 .allow_origin(
-                    config
-                        .wed_domains
-                        .iter()
-                        .map(|domain| {
-                            domain
-                                .parse::<HeaderValue>()
-                                .expect("parse web domains into HeaderValue failed")
-                        })
-                        .collect::<Vec<HeaderValue>>(),
+                    Any, // config
+                        //     .wed_domains
+                        //     .iter()
+                        //     .map(|domain| {
+                        //         domain
+                        //             .parse::<HeaderValue>()
+                        //             .expect("parse web domains into HeaderValue failed")
+                        //     })
+                        //     .collect::<Vec<HeaderValue>>(),
                 )
                 .allow_headers(vec![
                     http::header::CONTENT_TYPE,
