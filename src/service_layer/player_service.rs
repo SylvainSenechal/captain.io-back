@@ -1,7 +1,7 @@
 use crate::configs::app_state::AppState;
 use crate::errors::service_errors::ServiceError;
+use crate::models::messages_to_clients::WsMessageToClient;
 use crate::utilities::responses::{response_ok, response_ok_with_message, ApiResponse};
-use crate::ClientMessage;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -18,7 +18,7 @@ pub struct Player {
     // todo : change to different folder ?
     pub uuid: String,
     pub name: Option<String>,
-    pub personal_tx: broadcast::Sender<ClientMessage>,
+    pub personal_tx: broadcast::Sender<WsMessageToClient>,
     pub playing_in_lobby: Option<usize>,
 }
 
@@ -41,6 +41,7 @@ pub async fn set_username(
     // Json(mut create_user_request): Json<requests::CreateUserRequest>,
     Json(update_username_request): Json<UpdateUsernameRequest>,
 ) -> Result<(StatusCode, Json<ApiResponse<()>>), ServiceError> {
+    // todo : auth for this ?
     state
         .users
         .lock()
