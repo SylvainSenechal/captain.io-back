@@ -30,21 +30,24 @@ pub struct ChatMessage {
 pub struct Lobby {
     pub lobby_id: usize,
     pub status: LobbyStatus,
+    pub player_capacity: usize,
     pub lobby_broadcast: broadcast::Sender<WsMessageToClient>,
     pub users: HashSet<String>,
     pub messages: Vec<ChatMessage>,
 }
 
 impl Lobby {
-    fn new(lobby_id: usize) -> Self {
+    fn new(lobby_id: usize, player_capacity: usize) -> Self {
         Self {
             lobby_id: lobby_id,
             status: LobbyStatus::AwaitingUsers,
+            player_capacity: player_capacity,
             lobby_broadcast: broadcast::channel(10).0,
             users: HashSet::new(),
-            messages: vec![ChatMessage {
-                message: format!("aLobbyMessage{}", lobby_id),
-            }],
+            // messages: vec![ChatMessage {
+            //     message: format!("aLobbyMessage{}", lobby_id),
+            // }],
+            messages: vec![],
         }
     }
 }
@@ -52,22 +55,22 @@ impl Lobby {
 impl AppState {
     pub fn new() -> Arc<AppState> {
         let lobbies: [Mutex<Lobby>; constants::NB_LOBBIES] = [
-            Mutex::new(Lobby::new(0)),
-            Mutex::new(Lobby::new(1)),
-            Mutex::new(Lobby::new(2)),
+            Mutex::new(Lobby::new(0, 2)),
+            Mutex::new(Lobby::new(1, 3)),
+            Mutex::new(Lobby::new(2, 4)),
         ];
         Arc::new(AppState {
             global_broadcast: broadcast::channel(10).0,
             global_chat_messages: Mutex::new(vec![
-                ChatMessage {
-                    message: "coucou1".to_string(),
-                },
-                ChatMessage {
-                    message: "coucou2 hehe".to_string(),
-                },
-                ChatMessage {
-                    message: "coucou3".to_string(),
-                },
+                // ChatMessage {
+                //     message: "coucou1".to_string(),
+                // },
+                // ChatMessage {
+                //     message: "coucou2 hehe".to_string(),
+                // },
+                // ChatMessage {
+                //     message: "coucou3".to_string(),
+                // },
             ]),
             users: Mutex::new(HashMap::new()),
             lobby: lobbies,

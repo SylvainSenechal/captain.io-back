@@ -38,7 +38,6 @@ pub struct UpdateUsernameRequest {
 pub async fn set_username(
     State(state): State<Arc<AppState>>,
     Path(user_uuid): Path<String>,
-    // Json(mut create_user_request): Json<requests::CreateUserRequest>,
     Json(update_username_request): Json<UpdateUsernameRequest>,
 ) -> Result<(StatusCode, Json<ApiResponse<()>>), ServiceError> {
     // todo : auth for this ?

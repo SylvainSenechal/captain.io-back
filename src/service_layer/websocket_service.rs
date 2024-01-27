@@ -1,28 +1,18 @@
 use crate::configs;
 use crate::configs::app_state::ChatMessage;
 use crate::constants::constants::NB_LOBBIES;
-use crate::models::messages_from_clients::Command;
+use crate::models::messages_from_clients::ClientCommand;
+use crate::models::messages_to_clients::LobbyStatus;
 use crate::models::{
-    messages_to_clients::LobbiesUpdate, messages_to_clients::LobbyUpdate,
+    messages_to_clients::LobbiesGeneralUpdate, messages_to_clients::LobbyGeneralUpdate,
     messages_to_clients::WsMessageToClient,
 };
 use crate::service_layer::player_service;
-use axum::{
-    extract::ws::{Message, WebSocket, WebSocketUpgrade},
-    extract::{Path, State},
-    http,
-    http::Method,
-    response::IntoResponse,
-    routing::get,
-    routing::post,
-    routing::put,
-    Router,
-};
+use axum::extract::ws::{Message, WebSocket};
 use futures_util::{
     sink::SinkExt,
     stream::{SplitStream, StreamExt},
 };
-use serde::Serialize;
 use std::sync::Arc;
 use tokio::sync::broadcast::{self, Receiver};
 
@@ -32,6 +22,7 @@ pub async fn handle_websocket(
     state: Arc<configs::app_state::AppState>,
 ) {
     let (mut sender, mut receiver) = socket.split();
+    
     println!("{:?}", state);
     // todo : return / timeout after x seconds
     let perso_tx = broadcast::channel(10).0;
@@ -60,7 +51,6 @@ pub async fn handle_websocket(
 
     global_lobby_update(state.clone());
     global_chat_sync(state.clone());
-    global_chat_new_message(state.clone(), "new message heheh".to_string());
 
     let cloned_state = state.clone();
     let mut handle2 = tokio::spawn(async move {
@@ -144,43 +134,50 @@ async fn receive(
     state: Arc<configs::app_state::AppState>,
 ) {
     // todo : add disconnected for afk, spawn task waiter, reset to 0 after each message, if time > 100 : return err afk
-    while let Some(Ok(message)) = receiver.next().await {
+    'rec_v_loop: while let Some(Ok(message)) = receiver.next().await {
         match message {
             Message::Text(msg) => {
-                let command = msg.parse::<Command>();
+                let command = msg.parse::<ClientCommand>();
                 if let Ok(c) = command {
                     match c {
-                        Command::JoinLobby(lobby_id) => {
-                            // todo : check if the user was in another lobby
-                            // todo : check that the lobby is in waiting state
-                            // todo : check lobby capacity
-                            println!("JOIN LOBBY {:?}", lobby_id);
-                            if lobby_id < NB_LOBBIES {
+                        ClientCommand::JoinLobby(join_lobby_id) => {
+                            println!("JOIN LOBBY {:?}", join_lobby_id);
+                            if join_lobby_id < NB_LOBBIES {
                                 let mut players = state.users.lock().expect("failed to lock users");
+                                let mut lobby_to_join = state.lobby[join_lobby_id]
+                                    .lock()
+                                    .expect("failed ot lock lobby");
+                                if lobby_to_join.users.len() >= lobby_to_join.player_capacity {
+                                    continue 'rec_v_loop;
+                                }
+                                if lobby_to_join.status != LobbyStatus::AwaitingUsers {
+                                    continue 'rec_v_loop;
+                                }
                                 let player =
                                     players.get_mut(&user_uuid).expect("failed to get username");
-                                if let Some(current_lobby) = player.playing_in_lobby {
-                                    state.lobby[current_lobby]
+                                if let Some(in_lobby) = player.playing_in_lobby {
+                                    if in_lobby == join_lobby_id {
+                                        // don't join a lobby you're already in
+                                        continue 'rec_v_loop;
+                                    }
+                                    // remove from current lobby before joining the new one
+                                    state.lobby[in_lobby]
                                         .lock()
                                         .unwrap()
                                         .users
                                         .remove(&user_uuid.clone());
                                 }
-                                state.lobby[lobby_id]
-                                    .lock()
-                                    .unwrap()
-                                    .users
-                                    .insert(user_uuid.clone());
-
-                                player.playing_in_lobby = Some(lobby_id);
+                                lobby_to_join.users.insert(user_uuid.clone());
+                                drop(lobby_to_join);
+                                player.playing_in_lobby = Some(join_lobby_id);
                                 player
                                     .personal_tx
-                                    .send(WsMessageToClient::JoinLobby(lobby_id))
+                                    .send(WsMessageToClient::JoinLobby(join_lobby_id))
                                     .expect("failed to notify joined lobby");
                                 player
                                     .personal_tx
                                     .send(WsMessageToClient::LobbyChatSync(
-                                        state.lobby[lobby_id]
+                                        state.lobby[join_lobby_id]
                                             .lock()
                                             .expect("failed to lock lobby")
                                             .messages
@@ -191,7 +188,7 @@ async fn receive(
                                 global_lobby_update(state.clone());
                             }
                         }
-                        Command::Ping => {
+                        ClientCommand::Ping => {
                             state
                                 .users
                                 .lock()
@@ -202,8 +199,7 @@ async fn receive(
                                 .send(WsMessageToClient::Pong)
                                 .expect("failed to pong user");
                         }
-                        Command::SendGlobalMessage(message) => {
-                            println!("global message {}", message);
+                        ClientCommand::SendGlobalMessage(message) => {
                             state
                                 .global_chat_messages
                                 .lock()
@@ -211,22 +207,9 @@ async fn receive(
                                 .push(ChatMessage {
                                     message: message.clone(),
                                 });
-                            println!("looo global message {:?}", state.global_chat_messages);
-                            // global_chat_sync(state.clone());
                             global_chat_new_message(state.clone(), message);
                         }
-                        Command::SendLobbyMessage(lobby_id, message) => {
-                            println!("lobby id {}", lobby_id);
-                            println!("message {}", message);
-                            state.lobby[lobby_id]
-                                .lock()
-                                .expect("failed ot lock lobby")
-                                .messages
-                                .push(ChatMessage {
-                                    message: message.clone(),
-                                });
-
-                            global_lobby_update(state.clone());
+                        ClientCommand::SendLobbyMessage(message) => {
                             if let Some(lobby_user) = state
                                 .users
                                 .lock()
@@ -235,18 +218,22 @@ async fn receive(
                                 .expect("couldnt find username")
                                 .playing_in_lobby
                             {
-                                println!("playing in lobby {}", lobby_user);
-
-                                if lobby_id == lobby_user {
-                                    state.lobby[lobby_user]
-                                        .lock()
-                                        .unwrap()
-                                        .lobby_broadcast
-                                        .send(WsMessageToClient::LobbyChatNewMessage(ChatMessage {
-                                            message: message,
-                                        }))
-                                        .expect("failed to notify of new lobby message");
-                                }
+                                // can only send messages in the lobby youre in
+                                state.lobby[lobby_user]
+                                    .lock()
+                                    .expect("failed ot lock lobby")
+                                    .messages
+                                    .push(ChatMessage {
+                                        message: message.clone(),
+                                    });
+                                state.lobby[lobby_user]
+                                    .lock()
+                                    .unwrap()
+                                    .lobby_broadcast
+                                    .send(WsMessageToClient::LobbyChatNewMessage(ChatMessage {
+                                        message: message,
+                                    }))
+                                    .expect("failed to notify of new lobby message");
                             }
                         }
                     }
@@ -260,15 +247,16 @@ async fn receive(
 }
 
 fn global_lobby_update(state: Arc<configs::app_state::AppState>) {
-    let mut update: LobbiesUpdate = LobbiesUpdate {
+    let mut update: LobbiesGeneralUpdate = LobbiesGeneralUpdate {
         total_users_connected: state.users.lock().expect("failed to lock users").len(),
         lobbies: vec![],
     };
 
     for lob in state.lobby.iter() {
         let lobby = lob.lock().expect("failed to lock lobby");
-        update.lobbies.push(LobbyUpdate {
-            nb_users: lobby.users.len(),
+        update.lobbies.push(LobbyGeneralUpdate {
+            player_capacity: lobby.player_capacity,
+            nb_connected: lobby.users.len(),
             status: lobby.status,
         });
     }

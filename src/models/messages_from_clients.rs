@@ -1,42 +1,42 @@
-// todo : rename "command"
 #[derive(Debug)]
-pub enum Command {
+pub enum ClientCommand {
     JoinLobby(usize),
     SendGlobalMessage(String),
-    SendLobbyMessage(usize, String),
+    SendLobbyMessage(String),
     Ping,
 }
 
-impl std::str::FromStr for Command {
+// todo : handle expect errors
+impl std::str::FromStr for ClientCommand {
     type Err = ();
-    fn from_str(msg: &str) -> Result<Command, Self::Err> {
-        let commands: Vec<&str> = msg.splitn(2, ' ').collect();
-        if commands.len() < 2 {
-            // todo : recheck this, not always==2
-            return Err(());
-        }
-        match commands[0] {
-            "/joinlobby" => Ok(Command::JoinLobby(
-                commands[1]
-                    .parse::<usize>()
-                    .expect("couldnt parse lobby id string to usize"),
-            )),
-            "/ping" => Ok(Command::Ping),
-            "/sendGlobalMessage" => {
-                println!("new global message {}", commands[1]);
-                Ok(Command::SendGlobalMessage(commands[1].to_string()))
+    fn from_str(msg: &str) -> Result<ClientCommand, Self::Err> {
+        // let commands: Vec<&str> = msg.splitn(2, ' ').collect();
+        let mut commands = msg.splitn(2, ' ');
+        // println!("commands: {:?}", commands);
+
+        if let Some(command_type) = commands.next() {
+            match command_type {
+                "/joinLobby" => Ok(ClientCommand::JoinLobby(
+                    commands
+                        .next()
+                        .expect("failed to fined en of command")
+                        .parse::<usize>()
+                        .expect("couldnt parse lobby id string to usize"),
+                )),
+                "/ping" => Ok(ClientCommand::Ping),
+                "/sendGlobalMessage" => Ok(ClientCommand::SendGlobalMessage(
+                    commands
+                        .next()
+                        .expect("failed to fined en of command")
+                        .to_string(),
+                )),
+                "/sendLobbyMessage" => Ok(ClientCommand::SendLobbyMessage(
+                    commands.next().expect("no lobby message found").to_string(),
+                )),
+                _ => Err(()),
             }
-            "/sendLobbyMessage" => {
-                println!("new lobby message {}", commands[1]);
-                let message: Vec<&str> = commands[1].splitn(2, ' ').collect(); // todo : check out of bound
-                Ok(Command::SendLobbyMessage(
-                    message[0]
-                        .parse()
-                        .expect("failed to parse usize for send message"),
-                    message[1].to_string(),
-                ))
-            }
-            _ => Err(()),
+        } else {
+            Err(())
         }
     }
 }

@@ -1,14 +1,4 @@
-use axum::{
-    extract::ws::{Message, WebSocket, WebSocketUpgrade},
-    extract::{Path, State},
-    http,
-    http::Method,
-    response::IntoResponse,
-    routing::get,
-    routing::post,
-    routing::put,
-    Router,
-};
+use axum::extract::ws::Message;
 use serde::Serialize;
 
 use crate::configs::app_state::ChatMessage;
@@ -18,7 +8,7 @@ use crate::configs::app_state::ChatMessage;
 pub enum WsMessageToClient {
     Pong,
     JoinLobby(usize),
-    LobbiesUpdate(LobbiesUpdate),
+    LobbiesUpdate(LobbiesGeneralUpdate),
     GlobalChatSync(Vec<ChatMessage>),  // get chat history
     GlobalChatNewMessage(ChatMessage), // one new messages
     LobbyChatSync(Vec<ChatMessage>),   // get lobby history
@@ -34,7 +24,7 @@ impl WsMessageToClient {
             }
             WsMessageToClient::LobbiesUpdate(update) => Message::Text(format!(
                 "{}{}",
-                "/lobbiesUpdate ",
+                "/lobbiesGeneralUpdate ",
                 serde_json::to_string(update).expect("failed to jsonize lobbies update")
             )),
             WsMessageToClient::GlobalChatSync(messages) => Message::Text(format!(
@@ -62,17 +52,18 @@ impl WsMessageToClient {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct LobbiesUpdate {
-    pub lobbies: Vec<LobbyUpdate>,
+pub struct LobbiesGeneralUpdate {
+    pub lobbies: Vec<LobbyGeneralUpdate>,
     pub total_users_connected: usize,
 }
 #[derive(Debug, Clone, Serialize)]
-pub struct LobbyUpdate {
-    pub nb_users: usize,
+pub struct LobbyGeneralUpdate {
+    pub player_capacity: usize,
+    pub nb_connected: usize,
     pub status: LobbyStatus,
 }
 
-#[derive(Debug, Copy, Clone, Serialize)]
+#[derive(Debug, Copy, Clone, Serialize, PartialEq, Eq)]
 pub enum LobbyStatus {
     AwaitingUsers,
     InGame,
