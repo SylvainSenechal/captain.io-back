@@ -13,6 +13,7 @@ pub enum WsMessageToClient {
     GlobalChatNewMessage(ChatMessage), // one new messages
     LobbyChatSync(Vec<ChatMessage>),   // get lobby history
     LobbyChatNewMessage(ChatMessage),  // one new messages
+    GameStarted(usize),                // usize : lobby id
 }
 
 impl WsMessageToClient {
@@ -47,6 +48,9 @@ impl WsMessageToClient {
                 "/lobbyChatNewMessage ",
                 serde_json::to_string(new_message).expect("failed to jsonize message")
             )),
+            WsMessageToClient::GameStarted(lobby_id) => {
+                Message::Text(format!("/gameStarted {}", lobby_id))
+            }
         }
     }
 }
@@ -61,10 +65,12 @@ pub struct LobbyGeneralUpdate {
     pub player_capacity: usize,
     pub nb_connected: usize,
     pub status: LobbyStatus,
+    pub next_starting_time: Option<i64>, // unix timestamp seconds
 }
 
 #[derive(Debug, Copy, Clone, Serialize, PartialEq, Eq)]
 pub enum LobbyStatus {
     AwaitingUsers,
     InGame,
+    StartingSoon, // todo : be careful, if a user join and triggers that status and then leaves + what if multiple people leave
 }

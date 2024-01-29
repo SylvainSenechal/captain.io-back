@@ -18,7 +18,7 @@ pub struct AppState {
     pub global_broadcast: broadcast::Sender<WsMessageToClient>,
     pub global_chat_messages: Mutex<Vec<ChatMessage>>,
     pub users: Mutex<HashMap<String, Player>>,
-    pub lobby: [Mutex<Lobby>; constants::NB_LOBBIES],
+    pub lobbies: [Mutex<Lobby>; constants::NB_LOBBIES],
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -30,6 +30,7 @@ pub struct ChatMessage {
 pub struct Lobby {
     pub lobby_id: usize,
     pub status: LobbyStatus,
+    pub next_starting_time: Option<i64>, // unix timestamp seconds
     pub player_capacity: usize,
     pub lobby_broadcast: broadcast::Sender<WsMessageToClient>,
     pub users: HashSet<String>,
@@ -41,6 +42,7 @@ impl Lobby {
         Self {
             lobby_id: lobby_id,
             status: LobbyStatus::AwaitingUsers,
+            next_starting_time: None,
             player_capacity: player_capacity,
             lobby_broadcast: broadcast::channel(10).0,
             users: HashSet::new(),
@@ -57,10 +59,11 @@ impl AppState {
         let lobbies: [Mutex<Lobby>; constants::NB_LOBBIES] = [
             Mutex::new(Lobby::new(0, 2)),
             Mutex::new(Lobby::new(1, 3)),
-            Mutex::new(Lobby::new(2, 4)),
+            Mutex::new(Lobby::new(2, 1)),
+            Mutex::new(Lobby::new(3, 4)),
         ];
         Arc::new(AppState {
-            global_broadcast: broadcast::channel(10).0,
+            global_broadcast: broadcast::channel(100).0,
             global_chat_messages: Mutex::new(vec![
                 // ChatMessage {
                 //     message: "coucou1".to_string(),
@@ -73,7 +76,7 @@ impl AppState {
                 // },
             ]),
             users: Mutex::new(HashMap::new()),
-            lobby: lobbies,
+            lobbies: lobbies,
         })
     }
 }

@@ -1,6 +1,6 @@
 use crate::configs;
 use crate::configs::app_state::ChatMessage;
-use crate::constants::constants::NB_LOBBIES;
+use crate::constants::constants::{DELAY_FOR_GAMESTART_SEC, NB_LOBBIES};
 use crate::models::messages_from_clients::ClientCommand;
 use crate::models::messages_to_clients::LobbyStatus;
 use crate::models::{
@@ -9,6 +9,7 @@ use crate::models::{
 };
 use crate::service_layer::player_service;
 use axum::extract::ws::{Message, WebSocket};
+use chrono::Utc;
 use futures_util::{
     sink::SinkExt,
     stream::{SplitStream, StreamExt},
@@ -22,10 +23,10 @@ pub async fn handle_websocket(
     state: Arc<configs::app_state::AppState>,
 ) {
     let (mut sender, mut receiver) = socket.split();
-    
+
     println!("{:?}", state);
     // todo : return / timeout after x seconds
-    let perso_tx = broadcast::channel(10).0;
+    let perso_tx = broadcast::channel(100).0;
 
     state
         .users
@@ -43,50 +44,68 @@ pub async fn handle_websocket(
 
     let mut global_subscription = state.global_broadcast.subscribe();
     let mut personal_subscription = perso_tx.subscribe();
-    let mut lobby_subscription: Receiver<WsMessageToClient> = broadcast::channel(10).1;
+    let mut lobby_subscription: Receiver<WsMessageToClient> = broadcast::channel(100).1;
     let cloned_state = state.clone();
     let cloned_user_uuid = user_uuid.clone();
     let mut handle1 =
         tokio::spawn(async move { receive(&mut receiver, user_uuid.clone(), cloned_state).await });
 
-    global_lobby_update(state.clone());
+    global_lobbies_update(state.clone());
     global_chat_sync(state.clone());
 
     let cloned_state = state.clone();
     let mut handle2 = tokio::spawn(async move {
         loop {
-            // TODO : always send msg.to_string_message except in specific case
             tokio::select! {
-                Ok(msg) = global_subscription.recv() => {
-                    match msg {
-                        _ => sender.send(msg.to_string_message()).await.expect("failed to send to global sub")
-                    };
-                },
-                Ok(msg) = personal_subscription.recv() => {
-                    println!("sending personal message {:?}", msg);
-                    match msg {
-                        WsMessageToClient::JoinLobby(lobby_id) => {
-                            // todo : check bound lobby id
-                            println!("sending personal join lobby, {:?}", msg.to_string_message());
-                            lobby_subscription = cloned_state.lobby[lobby_id].lock().unwrap().lobby_broadcast.subscribe();
-                            sender.send(msg.to_string_message()).await.expect("failed to send to global sub");
+                elem = global_subscription.recv() => {
+                    match elem {
+                        Ok(msg) => {
+                            println!("global msg {:?}", msg);
+                            match msg {
+                                _ => sender.send(msg.to_string_message()).await.expect("failed to send to global sub")
+                            };
                         },
-                        _ => sender.send(msg.to_string_message()).await.expect("failed to send to personal sub")
-                    };
+                        Err(e) => {
+                           println!("eeee 1 {}", e);
+                        },
+                    }
+                }
+                elem = personal_subscription.recv() => {
+                    match elem {
+                        Ok(msg) => {
+                            println!("sending personal message {:?}", msg);
+                            match msg {
+                                WsMessageToClient::JoinLobby(lobby_id) => {
+                                    // todo : check bound lobby id
+                                    println!("sending personal join lobby, {:?}", msg.to_string_message());
+                                    lobby_subscription = cloned_state.lobbies[lobby_id].lock().unwrap().lobby_broadcast.subscribe();
+                                    sender.send(msg.to_string_message()).await.expect("failed to send to global sub");
+                                },
+                                _ => sender.send(msg.to_string_message()).await.expect("failed to send to personal sub")
+                            };
+                        },
+                        Err(e) => {
+                           println!("eeee 2 {}", e);
+                        }
+                    }
                 },
-                // TODO : handle ?
-                // Err(e) = personal_subscription.recv() => {
-                    // println!("eeee {}", e); => eeee channel lagged by 1
-                // }
-                // let res = personal_subscription.recv().await ?
-                // match res ...
-                Ok(msg) = lobby_subscription.recv() => {
-                    println!("sending lobby message {:?}", msg);
-                    match msg {
-                        _ => sender.send(msg.to_string_message()).await.expect("failed to send to lobby sub")
-                    };
+                elem = lobby_subscription.recv() => {
+                    match elem {
+                        Ok(msg) => {
+                            println!("sending lobby message {:?}", msg);
+                            match msg {
+                                _ => sender.send(msg.to_string_message()).await.expect("failed to send to lobby sub")
+                            };
+                        },
+                        Err(e) => {
+                        //    println!("eeee 3 {}", e);
+                        }
+                    }
                 },
-                else => break,
+                else => {
+                    println!("BREAK");
+                    break
+                },
             }
         }
     });
@@ -112,7 +131,7 @@ pub async fn handle_websocket(
         .expect("failed to get user by uuid")
         .playing_in_lobby
     {
-        state.lobby[lobby_id]
+        state.lobbies[lobby_id]
             .lock()
             .unwrap()
             .users
@@ -125,7 +144,7 @@ pub async fn handle_websocket(
         .expect("failed to lock users to remove disconnected")
         .remove(&cloned_user_uuid)
         .expect("failed to remove user from users list");
-    global_lobby_update(state.clone());
+    global_lobbies_update(state.clone());
 }
 
 async fn receive(
@@ -144,7 +163,7 @@ async fn receive(
                             println!("JOIN LOBBY {:?}", join_lobby_id);
                             if join_lobby_id < NB_LOBBIES {
                                 let mut players = state.users.lock().expect("failed to lock users");
-                                let mut lobby_to_join = state.lobby[join_lobby_id]
+                                let mut lobby_to_join = state.lobbies[join_lobby_id]
                                     .lock()
                                     .expect("failed ot lock lobby");
                                 if lobby_to_join.users.len() >= lobby_to_join.player_capacity {
@@ -161,15 +180,22 @@ async fn receive(
                                         continue 'rec_v_loop;
                                     }
                                     // remove from current lobby before joining the new one
-                                    state.lobby[in_lobby]
+                                    state.lobbies[in_lobby]
                                         .lock()
                                         .unwrap()
                                         .users
                                         .remove(&user_uuid.clone());
                                 }
                                 lobby_to_join.users.insert(user_uuid.clone());
-                                drop(lobby_to_join);
                                 player.playing_in_lobby = Some(join_lobby_id);
+                                if lobby_to_join.users.len() == lobby_to_join.player_capacity {
+                                    // Start the game soon..
+                                    println!("lobby {} is starting", lobby_to_join.lobby_id);
+                                    lobby_to_join.status = LobbyStatus::StartingSoon;
+                                    lobby_to_join.next_starting_time =
+                                        Some(Utc::now().timestamp() + DELAY_FOR_GAMESTART_SEC);
+                                }
+                                drop(lobby_to_join);
                                 player
                                     .personal_tx
                                     .send(WsMessageToClient::JoinLobby(join_lobby_id))
@@ -177,7 +203,7 @@ async fn receive(
                                 player
                                     .personal_tx
                                     .send(WsMessageToClient::LobbyChatSync(
-                                        state.lobby[join_lobby_id]
+                                        state.lobbies[join_lobby_id]
                                             .lock()
                                             .expect("failed to lock lobby")
                                             .messages
@@ -185,7 +211,7 @@ async fn receive(
                                     ))
                                     .expect("failed to notify current lobby chat");
                                 drop(players); // unlock players because we are trying to lock it in global_lobby_update
-                                global_lobby_update(state.clone());
+                                global_lobbies_update(state.clone());
                             }
                         }
                         ClientCommand::Ping => {
@@ -219,14 +245,14 @@ async fn receive(
                                 .playing_in_lobby
                             {
                                 // can only send messages in the lobby youre in
-                                state.lobby[lobby_user]
+                                state.lobbies[lobby_user]
                                     .lock()
                                     .expect("failed ot lock lobby")
                                     .messages
                                     .push(ChatMessage {
                                         message: message.clone(),
                                     });
-                                state.lobby[lobby_user]
+                                state.lobbies[lobby_user]
                                     .lock()
                                     .unwrap()
                                     .lobby_broadcast
@@ -246,23 +272,25 @@ async fn receive(
     }
 }
 
-fn global_lobby_update(state: Arc<configs::app_state::AppState>) {
+fn global_lobbies_update(state: Arc<configs::app_state::AppState>) {
     let mut update: LobbiesGeneralUpdate = LobbiesGeneralUpdate {
         total_users_connected: state.users.lock().expect("failed to lock users").len(),
         lobbies: vec![],
     };
 
-    for lob in state.lobby.iter() {
-        let lobby = lob.lock().expect("failed to lock lobby");
+    for lobby in state.lobbies.iter() {
+        let lobby = lobby.lock().expect("failed to lock lobby");
         update.lobbies.push(LobbyGeneralUpdate {
             player_capacity: lobby.player_capacity,
             nb_connected: lobby.users.len(),
             status: lobby.status,
+            next_starting_time: lobby.next_starting_time,
         });
     }
     state
         .global_broadcast
-        .send(WsMessageToClient::LobbiesUpdate(update));
+        .send(WsMessageToClient::LobbiesUpdate(update))
+        .expect("global lobbies update failed");
 }
 
 fn global_chat_sync(state: Arc<configs::app_state::AppState>) {
@@ -274,12 +302,14 @@ fn global_chat_sync(state: Arc<configs::app_state::AppState>) {
                 .lock()
                 .expect("failed to lock global chat")
                 .to_owned(),
-        ));
+        ))
+        .expect("global chat sync failed");
 }
 fn global_chat_new_message(state: Arc<configs::app_state::AppState>, message: String) {
     state
         .global_broadcast
         .send(WsMessageToClient::GlobalChatNewMessage(ChatMessage {
             message: message,
-        }));
+        }))
+        .expect("global chat new message failed");
 }
