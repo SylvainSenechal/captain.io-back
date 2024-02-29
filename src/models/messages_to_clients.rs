@@ -1,9 +1,13 @@
+use std::collections::HashMap;
+
 use axum::extract::ws::Message;
 use serde::Serialize;
 
-use crate::configs::app_state::ChatMessage;
+use crate::{
+    configs::app_state::{ChatMessage, LobbyStatus, Tile},
+    service_layer::player_service::Color,
+};
 
-// todo : rename "WsMessageToClient"
 #[derive(Debug, Clone)]
 pub enum WsMessageToClient {
     Pong,
@@ -14,6 +18,7 @@ pub enum WsMessageToClient {
     LobbyChatSync(Vec<ChatMessage>),   // get lobby history
     LobbyChatNewMessage(ChatMessage),  // one new messages
     GameStarted(usize),                // usize : lobby id
+    GameUpdate(GameUpdate),
 }
 
 impl WsMessageToClient {
@@ -51,6 +56,11 @@ impl WsMessageToClient {
             WsMessageToClient::GameStarted(lobby_id) => {
                 Message::Text(format!("/gameStarted {}", lobby_id))
             }
+            WsMessageToClient::GameUpdate(game_state) => Message::Text(format!(
+                "{}{}",
+                "/gameUpdate ",
+                serde_json::to_string(game_state).expect("failed to jsonize game_state")
+            )),
         }
     }
 }
@@ -58,7 +68,7 @@ impl WsMessageToClient {
 #[derive(Debug, Clone, Serialize)]
 pub struct LobbiesGeneralUpdate {
     pub lobbies: Vec<LobbyGeneralUpdate>,
-    pub total_users_connected: usize,
+    pub total_players_connected: usize,
 }
 #[derive(Debug, Clone, Serialize)]
 pub struct LobbyGeneralUpdate {
@@ -68,9 +78,15 @@ pub struct LobbyGeneralUpdate {
     pub next_starting_time: Option<i64>, // unix timestamp seconds
 }
 
-#[derive(Debug, Copy, Clone, Serialize, PartialEq, Eq)]
-pub enum LobbyStatus {
-    AwaitingUsers,
-    InGame,
-    StartingSoon, // todo : be careful, if a user join and triggers that status and then leaves + what if multiple people leave
+#[derive(Debug, Clone, Serialize)]
+pub struct GameUpdate {
+    pub board_game: Vec<Vec<Tile>>,
+    pub score_board: HashMap<String, PlayerScore>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PlayerScore {
+    pub total_troops: usize,
+    pub total_positions: usize,
+    pub color: Color,
 }

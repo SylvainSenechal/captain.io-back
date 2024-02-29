@@ -1,7 +1,10 @@
 mod configs;
 mod constants;
-mod errors;
+mod custom_errors;
+mod data_access_layer;
 mod models;
+mod requests;
+mod responses;
 mod service_layer;
 mod utilities;
 
@@ -23,12 +26,13 @@ use std::sync::Arc;
 use tower_http::cors::Any;
 
 use crate::{
-    models::messages_to_clients::{LobbyStatus, WsMessageToClient},
+    models::messages_to_clients::WsMessageToClient,
     service_layer::websocket_service::handle_websocket,
 };
 
 // todo : - test send message to an empty broadcaster (like early before the webserver is listening)
 //        - + be careful when lobby is empty, send will fail, deal with it
+// todo : recheck usize/int
 #[tokio::main]
 async fn main() {
     println!("Hello, world!");
@@ -39,12 +43,20 @@ async fn main() {
     let app = Router::new()
         .route("/ws/:player_uuid", get(websocket_connection))
         .route(
-            "/players/uuid",
-            get(service_layer::player_service::request_uuid),
+            "/players/new",
+            get(service_layer::player_service::request_new_player),
+        )
+        .route(
+            "/players/name/random",
+            get(service_layer::player_service::get_random_name),
+        )
+        .route(
+            "/players/name/is_valid",
+            post(service_layer::player_service::is_valid_playername),
         )
         .route(
             "/players/:uuid",
-            put(service_layer::player_service::set_username),
+            put(service_layer::player_service::set_playername),
         )
         .layer(
             CorsLayer::new()
@@ -80,42 +92,17 @@ async fn main() {
         .await
         .unwrap();
 
-    let game_loop_handler = tokio::spawn(async { game_loop(app_state).await });
+    let game_loop_handler =
+        tokio::spawn(async { service_layer::game_service::game_loop(app_state).await });
 
     axum::serve(listener, app).await.unwrap();
-}
-
-use tokio::time::{sleep, Duration};
-async fn game_loop(state: Arc<configs::app_state::AppState>) {
-    // todo : use interval instead of sleep https://docs.rs/tokio/latest/tokio/time/fn.interval.html
-    // be careful if the game loop is longer than the interval
-    let mut i = 0;
-    loop {
-        println! {"loop {}", i};
-        i = i + 1;
-        sleep(Duration::from_millis(1000)).await;
-        for mutex_lobby in state.lobbies.iter() {
-            let lobby = mutex_lobby.lock().expect("failed to lock lobby");
-            // todo starting soon + time ok
-            if lobby.status == LobbyStatus::StartingSoon {
-                println! {"lobby starting {:?}", lobby};
-                println! {"lobby starting {:?}", lobby};
-                lobby
-                    .lobby_broadcast
-                    .send(WsMessageToClient::GameStarted(lobby.lobby_id))
-                    .expect("failed to notify game started");
-            }
-        }
-    }
 }
 
 async fn websocket_connection(
     ws: WebSocketUpgrade,
     State(state): State<Arc<configs::app_state::AppState>>,
-    Path(user_uuid): Path<String>,
+    Path(player_uuid): Path<String>,
 ) -> impl IntoResponse {
-    println!("new connection {:?}", state);
-    println!("new connection {:?}", user_uuid);
-    // todo : check valid uuid
-    ws.on_upgrade(|socket| handle_websocket(user_uuid, socket, state))
+    println!("new connection {:?}", player_uuid);
+    ws.on_upgrade(|socket| handle_websocket(player_uuid, socket, state))
 }

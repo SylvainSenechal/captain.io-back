@@ -1,4 +1,4 @@
-// use crate::errors::sqlite_errors::SqliteError;
+use crate::custom_errors::sqlite_errors::SqliteError;
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -17,9 +17,9 @@ pub struct ApiResponseError {
 #[derive(Debug)]
 pub enum ServiceError {
     Internal,
-    UserAlreadyExist,
+    PlayerAlreadyExist,
     NoPotentialMatchFound,
-    // Sqlite(SqliteError),
+    Sqlite(SqliteError),
     ForbiddenQuery,
     ValueNotAccepted(String, String), // (Value, Reason)
     Transaction,
@@ -36,9 +36,9 @@ impl ServiceError {
     pub fn error_message(&self) -> String {
         match self {
             Self::Internal => "Internal error".to_string(),
-            Self::UserAlreadyExist => "User already exists".to_string(),
+            Self::PlayerAlreadyExist => "Player already exists".to_string(),
             Self::NoPotentialMatchFound => "No potential match found".to_string(),
-            // Self::Sqlite(_) => "Sqlite internal error".to_string(),
+            Self::Sqlite(_) => "Sqlite internal error".to_string(),
             Self::ForbiddenQuery => "Query forbidden error".to_string(),
             Self::ValueNotAccepted(value, reason) => "SQL provided value not accepted, value = "
                 .to_string()
@@ -53,9 +53,9 @@ impl ServiceError {
     fn status_code(&self) -> StatusCode {
         match *self {
             Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::UserAlreadyExist => StatusCode::UNPROCESSABLE_ENTITY,
+            Self::PlayerAlreadyExist => StatusCode::UNPROCESSABLE_ENTITY,
             Self::NoPotentialMatchFound => StatusCode::NOT_FOUND,
-            // Self::Sqlite(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::Sqlite(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::ForbiddenQuery => StatusCode::FORBIDDEN,
             Self::ValueNotAccepted(_, _) => StatusCode::FORBIDDEN,
             Self::Transaction => StatusCode::INTERNAL_SERVER_ERROR,

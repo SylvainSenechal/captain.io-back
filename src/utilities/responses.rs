@@ -1,7 +1,7 @@
 use axum::{http::StatusCode, Json};
 use serde::Serialize;
 
-use crate::errors::service_errors::ServiceError;
+use crate::custom_errors::service_errors::ServiceError;
 // use crate::service_layer::auth_service::AuthError;
 
 #[derive(Serialize)]

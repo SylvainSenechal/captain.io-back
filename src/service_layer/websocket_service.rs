@@ -1,54 +1,73 @@
 use crate::configs;
-use crate::configs::app_state::ChatMessage;
+use crate::configs::app_state::{ChatMessage, LobbyStatus, Tile, TileStatus, TileType};
 use crate::constants::constants::{DELAY_FOR_GAMESTART_SEC, NB_LOBBIES};
+use crate::data_access_layer::player_dal::{self, Player};
 use crate::models::messages_from_clients::ClientCommand;
-use crate::models::messages_to_clients::LobbyStatus;
 use crate::models::{
     messages_to_clients::LobbiesGeneralUpdate, messages_to_clients::LobbyGeneralUpdate,
     messages_to_clients::WsMessageToClient,
 };
-use crate::service_layer::player_service;
+use crate::service_layer::game_service::pick_available_starting_coordinates;
+use crate::service_layer::player_service::{self, Color};
 use axum::extract::ws::{Message, WebSocket};
 use chrono::Utc;
 use futures_util::{
     sink::SinkExt,
     stream::{SplitStream, StreamExt},
 };
+use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::broadcast::{self, Receiver};
 
 pub async fn handle_websocket(
-    user_uuid: String,
+    player_uuid: String,
     socket: WebSocket,
     state: Arc<configs::app_state::AppState>,
 ) {
     let (mut sender, mut receiver) = socket.split();
 
-    println!("{:?}", state);
     // todo : return / timeout after x seconds
     let perso_tx = broadcast::channel(100).0;
 
+    let player_in_db = player_dal::get_player_by_uuid(&state, player_uuid.clone());
+    if let Err(err) = player_in_db {
+        println!(
+            "handle_websocket, can't find player with uuid={}, err={:?} ",
+            player_uuid, err
+        );
+        return;
+    }
+    let player = player_in_db.unwrap();
+    // todo : handle if player is already inside (handle double windows opened)
     state
-        .users
+        .players
         .lock()
-        .expect("couldnt lock users mutex")
+        .expect("couldnt lock players mutex")
         .insert(
-            user_uuid.clone(),
+            player.name.clone(),
             player_service::Player {
-                uuid: user_uuid.clone(),
-                name: None,
+                uuid: player.uuid.clone(),
+                name: player.name.clone(),
                 personal_tx: perso_tx.clone(),
                 playing_in_lobby: None,
+                queued_moves: VecDeque::new(),
+                current_position: (2, 2),
+                color: Color::Red,
             },
         );
+
+    println!("CURRENT PLAYERS {:?}", state.players);
 
     let mut global_subscription = state.global_broadcast.subscribe();
     let mut personal_subscription = perso_tx.subscribe();
     let mut lobby_subscription: Receiver<WsMessageToClient> = broadcast::channel(100).1;
     let cloned_state = state.clone();
-    let cloned_user_uuid = user_uuid.clone();
+    let cloned_player = Player {
+        uuid: player.uuid.clone(),
+        name: player.name.clone(),
+    };
     let mut handle1 =
-        tokio::spawn(async move { receive(&mut receiver, user_uuid.clone(), cloned_state).await });
+        tokio::spawn(async move { receive(&mut receiver, player.name, cloned_state).await });
 
     global_lobbies_update(state.clone());
     global_chat_sync(state.clone());
@@ -85,7 +104,7 @@ pub async fn handle_websocket(
                             };
                         },
                         Err(e) => {
-                           println!("eeee 2 {}", e);
+                        //    println!("eeee 2 {}", e);
                         }
                     }
                 },
@@ -110,7 +129,7 @@ pub async fn handle_websocket(
         }
     });
 
-    // Waiting while the user is connected
+    // Waiting while the player is connected
     tokio::select! {
         res = (&mut handle1) => {
             println!("aborted 1 {:?}", res);
@@ -122,34 +141,35 @@ pub async fn handle_websocket(
         },
     };
 
-    // Logic after disconnected user
+    // Logic after disconnected player
+    // todo : useless if I want to keep score when player leave but game continues ?
     if let Some(lobby_id) = state
-        .users
+        .players
         .lock()
-        .expect("failed to lock users")
-        .get(&cloned_user_uuid)
-        .expect("failed to get user by uuid")
+        .expect("failed to lock players")
+        .get(&cloned_player.name)
+        .expect("failed to get player by name")
         .playing_in_lobby
     {
         state.lobbies[lobby_id]
             .lock()
             .unwrap()
-            .users
-            .remove(&cloned_user_uuid);
+            .players
+            .remove(&cloned_player.name);
     }
 
     state
-        .users
+        .players
         .lock()
-        .expect("failed to lock users to remove disconnected")
-        .remove(&cloned_user_uuid)
-        .expect("failed to remove user from users list");
+        .expect("failed to lock players to remove disconnected")
+        .remove(&cloned_player.name)
+        .expect("failed to remove player from players list");
     global_lobbies_update(state.clone());
 }
 
 async fn receive(
     receiver: &mut SplitStream<WebSocket>,
-    user_uuid: String,
+    player_name: String,
     state: Arc<configs::app_state::AppState>,
 ) {
     // todo : add disconnected for afk, spawn task waiter, reset to 0 after each message, if time > 100 : return err afk
@@ -157,23 +177,47 @@ async fn receive(
         match message {
             Message::Text(msg) => {
                 let command = msg.parse::<ClientCommand>();
+                println!("new command {:?}", command);
                 if let Ok(c) = command {
                     match c {
+                        ClientCommand::Move(new_move) => state
+                            .players
+                            .lock()
+                            .expect("failed to lock players")
+                            .get_mut(&player_name)
+                            .expect("player not found")
+                            .queued_moves
+                            .push_back(new_move),
+                        // todo : limit queue size
                         ClientCommand::JoinLobby(join_lobby_id) => {
                             println!("JOIN LOBBY {:?}", join_lobby_id);
                             if join_lobby_id < NB_LOBBIES {
-                                let mut players = state.users.lock().expect("failed to lock users");
+                                let mut players =
+                                    state.players.lock().expect("failed to lock players");
                                 let mut lobby_to_join = state.lobbies[join_lobby_id]
                                     .lock()
                                     .expect("failed ot lock lobby");
-                                if lobby_to_join.users.len() >= lobby_to_join.player_capacity {
+                                if lobby_to_join.players.len() >= lobby_to_join.player_capacity {
                                     continue 'rec_v_loop;
                                 }
-                                if lobby_to_join.status != LobbyStatus::AwaitingUsers {
+                                if lobby_to_join.status != LobbyStatus::AwaitingPlayers {
                                     continue 'rec_v_loop;
                                 }
-                                let player =
-                                    players.get_mut(&user_uuid).expect("failed to get username");
+                                let mut unavailable_colors = vec![];
+                                for player in lobby_to_join.players.iter() {
+                                    unavailable_colors.push(
+                                        players
+                                            .get(player)
+                                            .expect("failed to get player for color")
+                                            .color
+                                            .clone(),
+                                    );
+                                }
+                                let new_player_color =
+                                    Color::pick_available_color(unavailable_colors);
+                                let player = players
+                                    .get_mut(&player_name)
+                                    .expect("failed to get playername");
                                 if let Some(in_lobby) = player.playing_in_lobby {
                                     if in_lobby == join_lobby_id {
                                         // don't join a lobby you're already in
@@ -183,12 +227,22 @@ async fn receive(
                                     state.lobbies[in_lobby]
                                         .lock()
                                         .unwrap()
-                                        .users
-                                        .remove(&user_uuid.clone());
+                                        .players
+                                        .remove(&player_name.clone());
                                 }
-                                lobby_to_join.users.insert(user_uuid.clone());
+                                lobby_to_join.players.insert(player_name.clone());
                                 player.playing_in_lobby = Some(join_lobby_id);
-                                if lobby_to_join.users.len() == lobby_to_join.player_capacity {
+                                player.color = new_player_color;
+                                player.current_position =
+                                    pick_available_starting_coordinates(&lobby_to_join.board_game);
+                                lobby_to_join.board_game[player.current_position.0]
+                                    [player.current_position.1] = Tile {
+                                    status: TileStatus::Occupied,
+                                    tile_type: TileType::Kingdom,
+                                    nb_troops: 22,
+                                    player_name: Some(player.name.clone()),
+                                };
+                                if lobby_to_join.players.len() == lobby_to_join.player_capacity {
                                     // Start the game soon..
                                     println!("lobby {} is starting", lobby_to_join.lobby_id);
                                     lobby_to_join.status = LobbyStatus::StartingSoon;
@@ -216,14 +270,14 @@ async fn receive(
                         }
                         ClientCommand::Ping => {
                             state
-                                .users
+                                .players
                                 .lock()
-                                .expect("couldnt lock users")
-                                .get(&user_uuid)
-                                .expect("failed to get username")
+                                .expect("couldnt lock players")
+                                .get(&player_name)
+                                .expect("failed to get playername")
                                 .personal_tx
                                 .send(WsMessageToClient::Pong)
-                                .expect("failed to pong user");
+                                .expect("failed to pong player");
                         }
                         ClientCommand::SendGlobalMessage(message) => {
                             state
@@ -236,23 +290,23 @@ async fn receive(
                             global_chat_new_message(state.clone(), message);
                         }
                         ClientCommand::SendLobbyMessage(message) => {
-                            if let Some(lobby_user) = state
-                                .users
+                            if let Some(lobby_player) = state
+                                .players
                                 .lock()
-                                .expect("couldnt lock users")
-                                .get(&user_uuid)
-                                .expect("couldnt find username")
+                                .expect("couldnt lock players")
+                                .get(&player_name)
+                                .expect("couldnt find playername")
                                 .playing_in_lobby
                             {
                                 // can only send messages in the lobby youre in
-                                state.lobbies[lobby_user]
+                                state.lobbies[lobby_player]
                                     .lock()
                                     .expect("failed ot lock lobby")
                                     .messages
                                     .push(ChatMessage {
                                         message: message.clone(),
                                     });
-                                state.lobbies[lobby_user]
+                                state.lobbies[lobby_player]
                                     .lock()
                                     .unwrap()
                                     .lobby_broadcast
@@ -267,14 +321,15 @@ async fn receive(
             }
             _ => {
                 println!("received unexpected message {:?}", message);
+                break 'rec_v_loop;
             }
         }
     }
 }
 
-fn global_lobbies_update(state: Arc<configs::app_state::AppState>) {
+pub fn global_lobbies_update(state: Arc<configs::app_state::AppState>) {
     let mut update: LobbiesGeneralUpdate = LobbiesGeneralUpdate {
-        total_users_connected: state.users.lock().expect("failed to lock users").len(),
+        total_players_connected: state.players.lock().expect("failed to lock players").len(),
         lobbies: vec![],
     };
 
@@ -282,7 +337,7 @@ fn global_lobbies_update(state: Arc<configs::app_state::AppState>) {
         let lobby = lobby.lock().expect("failed to lock lobby");
         update.lobbies.push(LobbyGeneralUpdate {
             player_capacity: lobby.player_capacity,
-            nb_connected: lobby.users.len(),
+            nb_connected: lobby.players.len(),
             status: lobby.status,
             next_starting_time: lobby.next_starting_time,
         });

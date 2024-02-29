@@ -1,5 +1,8 @@
+use crate::service_layer::player_service::PlayerMove;
+
 #[derive(Debug)]
 pub enum ClientCommand {
+    Move(PlayerMove),
     JoinLobby(usize),
     SendGlobalMessage(String),
     SendLobbyMessage(String),
@@ -16,6 +19,14 @@ impl std::str::FromStr for ClientCommand {
 
         if let Some(command_type) = commands.next() {
             match command_type {
+                "/move" => {
+                    let new_move = commands
+                        .next()
+                        .expect("no new move type found")
+                        .parse::<PlayerMove>()
+                        .expect("failed to convert string to player move");
+                    Ok(ClientCommand::Move(new_move))
+                }
                 "/joinLobby" => Ok(ClientCommand::JoinLobby(
                     commands
                         .next()
