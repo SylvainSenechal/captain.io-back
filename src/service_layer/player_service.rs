@@ -1,30 +1,24 @@
 use crate::configs::app_state::AppState;
-use crate::constants::constants::{MINIMUM_PLAYERNAME_LENGTH, NB_RANDOM_PLAYERNAMES};
+use crate::constants::constants::{MINIMUM_PLAYERNAME_LENGTH, PLAYER_NAMES};
 use crate::custom_errors::service_errors::ServiceError;
 use crate::custom_errors::sqlite_errors::SqliteError;
 use crate::data_access_layer::{self, player_dal};
 use crate::models::messages_to_clients::WsMessageToClient;
 use crate::requests::requests::CreatePlayerRequest;
 use crate::responses::responses::IsValidPlayernameResponse;
-use crate::utilities::responses::{response_ok, response_ok_with_message, ApiResponse};
+use crate::utilities::responses::{response_ok, ApiResponse};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
     Json,
 };
-use chrono::{format, naive};
 use rand::seq::SliceRandom;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
-use std::fmt::{format, Debug};
-use std::slice::Iter;
+use std::fmt::Debug;
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use uuid::Uuid;
-
-const PLAYER_NAMES: [&'static str; NB_RANDOM_PLAYERNAMES] =
-    ["Sylvain", "Marc", "Shermaine", "June"];
 
 #[derive(Debug)]
 pub struct Player {
@@ -72,7 +66,7 @@ pub enum Color {
 }
 
 impl Color {
-    pub fn pick_available_color(unavailable_colors: Vec<Color>) -> Color {
+    pub fn pick_available_color(unavailable_colors: &Vec<Color>) -> Color {
         const COLORS: [Color; 3] = [Color::Red, Color::Blue, Color::Pink];
         let new_color = COLORS
             .iter()
@@ -175,7 +169,7 @@ pub async fn set_playername(
         .players
         .lock()
         .expect("failed to lock players")
-        .entry(player_uuid)
+        .entry(player_uuid) // TODO !!! : is it really uuid or name ??
         .and_modify(|e| e.name = update_name_request.name.clone());
 
     response_ok(Some(update_name_request.name))

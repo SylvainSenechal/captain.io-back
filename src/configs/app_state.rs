@@ -9,9 +9,9 @@ use r2d2_sqlite::SqliteConnectionManager;
 use serde::Serialize;
 use tokio::sync::broadcast;
 
+use crate::constants::constants::DATABASE_NAME;
 use crate::service_layer::player_service::Player;
 use crate::{constants::constants, models::messages_to_clients::WsMessageToClient};
-use crate::{constants::constants::DATABASE_NAME, models};
 #[derive(Debug)]
 pub struct AppState {
     pub connection: Pool<SqliteConnectionManager>,
@@ -73,6 +73,7 @@ pub enum TileType {
     Blank,
     Kingdom,
     Mountain,
+    Castle,
 }
 
 impl Lobby {

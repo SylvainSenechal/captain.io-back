@@ -27,6 +27,7 @@ pub async fn handle_websocket(
     let (mut sender, mut receiver) = socket.split();
 
     // todo : return / timeout after x seconds
+    // todo : use multiple sender, one receiver ?
     let perso_tx = broadcast::channel(100).0;
 
     let player_in_db = player_dal::get_player_by_uuid(&state, player_uuid.clone());
@@ -95,10 +96,10 @@ pub async fn handle_websocket(
                             println!("sending personal message {:?}", msg);
                             match msg {
                                 WsMessageToClient::JoinLobby(lobby_id) => {
-                                    // todo : check bound lobby id
-                                    println!("sending personal join lobby, {:?}", msg.to_string_message());
-                                    lobby_subscription = cloned_state.lobbies[lobby_id].lock().unwrap().lobby_broadcast.subscribe();
-                                    sender.send(msg.to_string_message()).await.expect("failed to send to global sub");
+                                    if lobby_id < NB_LOBBIES { // lobby_id 0 indexed
+                                        lobby_subscription = cloned_state.lobbies[lobby_id].lock().unwrap().lobby_broadcast.subscribe();
+                                        sender.send(msg.to_string_message()).await.expect("failed to send to global sub");
+                                    }
                                 },
                                 _ => sender.send(msg.to_string_message()).await.expect("failed to send to personal sub")
                             };
@@ -111,7 +112,7 @@ pub async fn handle_websocket(
                 elem = lobby_subscription.recv() => {
                     match elem {
                         Ok(msg) => {
-                            println!("sending lobby message {:?}", msg);
+                            // println!("sending lobby message {:?}", msg);
                             match msg {
                                 _ => sender.send(msg.to_string_message()).await.expect("failed to send to lobby sub")
                             };
@@ -203,18 +204,6 @@ async fn receive(
                                 if lobby_to_join.status != LobbyStatus::AwaitingPlayers {
                                     continue 'rec_v_loop;
                                 }
-                                let mut unavailable_colors = vec![];
-                                for player in lobby_to_join.players.iter() {
-                                    unavailable_colors.push(
-                                        players
-                                            .get(player)
-                                            .expect("failed to get player for color")
-                                            .color
-                                            .clone(),
-                                    );
-                                }
-                                let new_player_color =
-                                    Color::pick_available_color(unavailable_colors);
                                 let player = players
                                     .get_mut(&player_name)
                                     .expect("failed to get playername");
@@ -232,16 +221,6 @@ async fn receive(
                                 }
                                 lobby_to_join.players.insert(player_name.clone());
                                 player.playing_in_lobby = Some(join_lobby_id);
-                                player.color = new_player_color;
-                                player.current_position =
-                                    pick_available_starting_coordinates(&lobby_to_join.board_game);
-                                lobby_to_join.board_game[player.current_position.0]
-                                    [player.current_position.1] = Tile {
-                                    status: TileStatus::Occupied,
-                                    tile_type: TileType::Kingdom,
-                                    nb_troops: 22,
-                                    player_name: Some(player.name.clone()),
-                                };
                                 if lobby_to_join.players.len() == lobby_to_join.player_capacity {
                                     // Start the game soon..
                                     println!("lobby {} is starting", lobby_to_join.lobby_id);

@@ -38,7 +38,6 @@ pub fn update_playername(
     let mut statement = binding
         .prepare_cached("Update Players set name = ? where uuid = ?")
         .map_err(map_sqlite_error)?;
-    let uuid = Uuid::now_v7().to_string();
     statement
         .execute(params![new_name, player_uuid])
         .map_err(map_sqlite_error)?;
