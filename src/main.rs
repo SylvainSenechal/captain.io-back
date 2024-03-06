@@ -32,7 +32,6 @@ use crate::{
 
 // todo : - test send message to an empty broadcaster (like early before the webserver is listening)
 //        - + be careful when lobby is empty, send will fail, deal with it
-// todo : recheck usize/int
 #[tokio::main]
 async fn main() {
     println!("Hello, world!");

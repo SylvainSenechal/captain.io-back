@@ -1,11 +1,11 @@
-// TODO : important opti ? check rwlock instead of mutex https://doc.rust-lang.org/std/sync/struct.RwLock.html
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, Mutex},
+    sync::{Arc, RwLock},
 };
 
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
+use rand::Rng;
 use serde::Serialize;
 use tokio::sync::broadcast;
 
@@ -16,9 +16,9 @@ use crate::{constants::constants, models::messages_to_clients::WsMessageToClient
 pub struct AppState {
     pub connection: Pool<SqliteConnectionManager>,
     pub global_broadcast: broadcast::Sender<WsMessageToClient>,
-    pub global_chat_messages: Mutex<Vec<ChatMessage>>,
-    pub players: Mutex<HashMap<String, Player>>,
-    pub lobbies: [Mutex<Lobby>; constants::NB_LOBBIES],
+    pub global_chat_messages: RwLock<Vec<ChatMessage>>,
+    pub players: RwLock<HashMap<String, Player>>,
+    pub lobbies: [RwLock<Lobby>; constants::NB_LOBBIES],
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -33,7 +33,7 @@ pub struct Lobby {
     pub next_starting_time: Option<i64>, // unix timestamp seconds
     pub player_capacity: usize,
     pub lobby_broadcast: broadcast::Sender<WsMessageToClient>,
-    pub players: HashSet<String>,
+    pub players: HashMap<String, String>, // name->uuid
     pub messages: Vec<ChatMessage>,
     pub board_game: Vec<Vec<Tile>>,
 }
@@ -50,7 +50,7 @@ pub struct Tile {
     pub status: TileStatus,
     pub tile_type: TileType,
     pub player_name: Option<String>,
-    pub nb_troops: usize, // todo : check which one is best
+    pub nb_troops: usize,
 }
 impl Default for Tile {
     fn default() -> Self {
@@ -78,61 +78,45 @@ pub enum TileType {
 
 impl Lobby {
     fn new(lobby_id: usize, player_capacity: usize) -> Self {
-        Self {
+        let mut lobby = Lobby {
             lobby_id: lobby_id,
             status: LobbyStatus::AwaitingPlayers,
             next_starting_time: None,
             player_capacity: player_capacity,
             lobby_broadcast: broadcast::channel(10).0,
-            players: HashSet::new(),
+            players: HashMap::new(),
             messages: vec![],
-            board_game: vec![
-                vec![
-                    Tile::default(),
-                    Tile::default(),
-                    Tile::default(),
-                    Tile::default(),
-                    Tile::default(),
-                    Tile::default(),
-                    Tile::default(),
-                ],
-                vec![
-                    Tile::default(),
-                    Tile::default(),
-                    Tile::default(),
-                    Tile::default(),
-                    Tile::default(),
-                    Tile::default(),
-                    Tile::default(),
-                ],
-                vec![
-                    Tile::default(),
-                    Tile::default(),
-                    Tile::default(),
-                    Tile::default(),
-                    Tile::default(),
-                    Tile::default(),
-                    Tile::default(),
-                ],
-                vec![
-                    Tile::default(),
-                    Tile::default(),
-                    Tile::default(),
-                    Tile::default(),
-                    Tile::default(),
-                    Tile::default(),
-                    Tile::default(),
-                ],
-                vec![
-                    Tile::default(),
-                    Tile::default(),
-                    Tile::default(),
-                    Tile::default(),
-                    Tile::default(),
-                    Tile::default(),
-                    Tile::default(),
-                ],
-            ],
+            board_game: vec![],
+        };
+        lobby.generate_new_board();
+        return lobby;
+    }
+    pub fn generate_new_board(&mut self) {
+        let mut rng = rand::thread_rng();
+        let width = rng.gen_range(5..8);
+        let height = rng.gen_range(15..20);
+        self.board_game = vec![];
+        for _ in 0..width {
+            let mut column = vec![];
+            for _ in 0..height {
+                column.push(Tile::default())
+            }
+            self.board_game.push(column)
+        }
+        for _ in 0..10 {
+            let x = rng.gen_range(0..width);
+            let y = rng.gen_range(0..height);
+            if self.board_game[x][y].tile_type == TileType::Blank {
+                self.board_game[x][y].tile_type = TileType::Mountain;
+            }
+        }
+        for _ in 0..10 {
+            let x = rng.gen_range(0..width);
+            let y = rng.gen_range(0..height);
+            if self.board_game[x][y].tile_type == TileType::Blank {
+                self.board_game[x][y].tile_type = TileType::Castle;
+                self.board_game[x][y].nb_troops = 15;
+            }
         }
     }
 }
@@ -144,17 +128,17 @@ impl AppState {
             .max_size(100)
             .build(manager)
             .expect("couldn't create pool");
-        let lobbies: [Mutex<Lobby>; constants::NB_LOBBIES] = [
-            Mutex::new(Lobby::new(0, 2)),
-            Mutex::new(Lobby::new(1, 3)),
-            Mutex::new(Lobby::new(2, 1)),
-            Mutex::new(Lobby::new(3, 4)),
+        let lobbies: [RwLock<Lobby>; constants::NB_LOBBIES] = [
+            RwLock::new(Lobby::new(0, 2)),
+            RwLock::new(Lobby::new(1, 3)),
+            RwLock::new(Lobby::new(2, 1)),
+            RwLock::new(Lobby::new(3, 4)),
         ];
         Arc::new(AppState {
             connection: pool,
             global_broadcast: broadcast::channel(100).0,
-            global_chat_messages: Mutex::new(vec![]),
-            players: Mutex::new(HashMap::new()),
+            global_chat_messages: RwLock::new(vec![]),
+            players: RwLock::new(HashMap::new()),
             lobbies: lobbies,
         })
     }

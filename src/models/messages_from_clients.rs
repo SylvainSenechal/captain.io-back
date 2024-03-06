@@ -13,9 +13,7 @@ pub enum ClientCommand {
 impl std::str::FromStr for ClientCommand {
     type Err = ();
     fn from_str(msg: &str) -> Result<ClientCommand, Self::Err> {
-        // let commands: Vec<&str> = msg.splitn(2, ' ').collect();
         let mut commands = msg.splitn(2, ' ');
-        // println!("commands: {:?}", commands);
 
         if let Some(command_type) = commands.next() {
             match command_type {

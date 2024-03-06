@@ -28,7 +28,7 @@ pub struct Player {
     pub personal_tx: broadcast::Sender<WsMessageToClient>,
     pub playing_in_lobby: Option<usize>,
     pub queued_moves: VecDeque<PlayerMove>,
-    pub current_position: (usize, usize),
+    pub xy: (usize, usize),
     pub color: Color,
 }
 
@@ -60,6 +60,7 @@ pub enum PlayerMove {
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub enum Color {
+    Grey, // Reserved for inactives
     Red,
     Blue,
     Pink,
@@ -167,7 +168,7 @@ pub async fn set_playername(
     // todo : check if it's the only thing we need to modify..
     state
         .players
-        .lock()
+        .write()
         .expect("failed to lock players")
         .entry(player_uuid) // TODO !!! : is it really uuid or name ??
         .and_modify(|e| e.name = update_name_request.name.clone());

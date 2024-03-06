@@ -19,6 +19,7 @@ pub enum WsMessageToClient {
     LobbyChatNewMessage(ChatMessage),  // one new messages
     GameStarted(usize),                // usize : lobby id
     GameUpdate(GameUpdate),
+    WinnerAnnouncement(String),
 }
 
 impl WsMessageToClient {
@@ -61,6 +62,9 @@ impl WsMessageToClient {
                 "/gameUpdate ",
                 serde_json::to_string(game_state).expect("failed to jsonize game_state")
             )),
+            WsMessageToClient::WinnerAnnouncement(winner_name) => {
+                Message::Text(format!("{}{}", "/winnerIs ", winner_name))
+            }
         }
     }
 }
