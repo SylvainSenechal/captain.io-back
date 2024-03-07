@@ -50,12 +50,18 @@ pub struct IsValidPlayernameRequest {
     name: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, Serialize)]
 pub enum PlayerMove {
     Left,
     Right,
     Up,
     Down,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PlayerMoves {
+    pub queued_moves: VecDeque<PlayerMove>,
+    pub xy: (usize, usize),
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -183,10 +189,11 @@ pub fn generate_available_playername(state: &Arc<AppState>) -> Result<String, Se
         let name = PLAYER_NAMES.choose(&mut rng);
         let full_playername = format!(
             "{}{}{}{}",
-            "unregistered",
+            "",
+            // "unregistered",
             "#",
             name.expect("failed to pick a random playername"),
-            rng.gen_range(0..10000)
+            rng.gen_range(0..100000)
         );
         match data_access_layer::player_dal::get_player_by_name(&state, full_playername.clone()) {
             Ok(_) => println!(

@@ -1,11 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use axum::extract::ws::Message;
 use serde::Serialize;
 
 use crate::{
     configs::app_state::{ChatMessage, LobbyStatus, Tile},
-    service_layer::player_service::Color,
+    service_layer::player_service::{Color, PlayerMove, PlayerMoves},
 };
 
 #[derive(Debug, Clone)]
@@ -20,6 +20,7 @@ pub enum WsMessageToClient {
     GameStarted(usize),                // usize : lobby id
     GameUpdate(GameUpdate),
     WinnerAnnouncement(String),
+    QueuedMoves(PlayerMoves),
 }
 
 impl WsMessageToClient {
@@ -65,6 +66,11 @@ impl WsMessageToClient {
             WsMessageToClient::WinnerAnnouncement(winner_name) => {
                 Message::Text(format!("{}{}", "/winnerIs ", winner_name))
             }
+            WsMessageToClient::QueuedMoves(moves) => Message::Text(format!(
+                "{}{}",
+                "/myMoves ",
+                serde_json::to_string(moves).expect("failed to jsonize game_state")
+            )),
         }
     }
 }

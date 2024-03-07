@@ -172,7 +172,15 @@ async fn receive(
                             if player.queued_moves.len() < MAX_QUEUED_MOVES {
                                 player.queued_moves.push_back(new_move)
                             }
-                            // todo : personal_tx send queue to draw
+                            player
+                                .personal_tx
+                                .send(WsMessageToClient::QueuedMoves(
+                                    player_service::PlayerMoves {
+                                        queued_moves: player.queued_moves.clone(),
+                                        xy: player.xy,
+                                    },
+                                ))
+                                .expect("failed to notify current lobby chat");
                         }
                         ClientCommand::JoinLobby(join_lobby_id) => {
                             println!("JOIN LOBBY {:?}", join_lobby_id);

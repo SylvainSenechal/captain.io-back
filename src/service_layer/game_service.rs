@@ -20,6 +20,8 @@ use super::{
     websocket_service::global_lobbies_update,
 };
 
+// todo : handle when tip of queue is stolen
+
 // todo : becareful if user join lobby and then quit before start : remove their game position
 // + test reload during the game
 pub async fn game_loop(state: Arc<configs::app_state::AppState>) {
@@ -135,6 +137,7 @@ fn tick_game(
                 .expect("no attacker name in score board")
                 .color = attacker.color.clone();
 
+            // todo : if move is useless, try to perform the next one ?
             if let Some(next_move) = attacker.queued_moves.pop_front() {
                 let mut attacked_x = attacker.xy.0;
                 let mut attacked_y = attacker.xy.1;
@@ -157,8 +160,6 @@ fn tick_game(
                     &lobby.board_game,
                     attacker.xy,
                     (attacked_x, attacked_y),
-                    // &lobby.board_game[attacker.xy.0][attacker.xy.1],
-                    // &lobby.board_game[attacked_x][attacked_y],
                 ) {
                     IssueAssault::AttackingSameTile => (),
                     IssueAssault::BlockedByMountain => (),
