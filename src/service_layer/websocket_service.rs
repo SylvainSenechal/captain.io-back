@@ -77,17 +77,28 @@ pub async fn handle_websocket(
     let mut handle2 = tokio::spawn(async move {
         loop {
             tokio::select! {
-                // elem = global_subscription.recv() => {
-                //     println!("global msg {:?}", elem);
-                //     match elem {
-                //         Ok(msg) => {
-                //             let _ = sender.send(msg.to_string_message()).await;
-                //         },
-                //         Err(e) => {
-                //            println!("eeee 1 {}", e);
-                //         },
-                //     }
-                // }
+                elem = global_subscription.recv() => {
+                    println!("global msg {:?}", elem);
+                    match elem {
+                        Ok(msg) => {
+                            let _ = sender.send(msg.to_string_message()).await;
+                        },
+                        Err(e) => {
+                           println!("eeee 1 {}", e);
+                        },
+                    }
+                }
+                elem = lobby_subscription.recv() => {
+                    println!("lobby msg {:?}", elem);
+                    match elem {
+                        Ok(msg) => {
+                            let _ = sender.send(msg.to_string_message()).await;
+                        },
+                        Err(e) => {
+                           println!("eeee 2 {}", e);
+                        }
+                    }
+                },
                 elem = personal_subscription.recv() => {
                     println!("personal msg {:?}", elem);
                     match elem {
@@ -103,20 +114,11 @@ pub async fn handle_websocket(
                             };
                         },
                         Err(e) => {
-                        //    println!("eeee 2 {}", e);
+                           println!("eeee 3 {}", e);
                         }
                     }
                 },
-                // elem = lobby_subscription.recv() => {
-                //     match elem {
-                //         Ok(msg) => {
-                //             let _ = sender.send(msg.to_string_message()).await;
-                //         },
-                //         Err(e) => {
-                //         //    println!("eeee 3 {}", e);
-                //         }
-                //     }
-                // },
+
                 else => {
                     println!("BREAK");
                     break
