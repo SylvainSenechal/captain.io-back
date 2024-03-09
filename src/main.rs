@@ -9,14 +9,10 @@ mod service_layer;
 mod utilities;
 
 use axum::{
-    extract::ws::WebSocketUpgrade,
-    extract::{Path, State},
-    http,
-    http::Method,
+    extract::{ws::WebSocketUpgrade, Path, State},
+    http::{self, HeaderValue, Method},
     response::IntoResponse,
-    routing::get,
-    routing::post,
-    routing::put,
+    routing::{get, post, put},
     Router,
 };
 use tower_http::cors::CorsLayer;
@@ -61,15 +57,16 @@ async fn main() {
             CorsLayer::new()
                 .allow_origin(
                     // todo : fix this Any
-                    Any, // config
-                        //     .wed_domains
-                        //     .iter()
-                        //     .map(|domain| {
-                        //         domain
-                        //             .parse::<HeaderValue>()
-                        //             .expect("parse web domains into HeaderValue failed")
-                        //     })
-                        //     .collect::<Vec<HeaderValue>>(),
+                    // Any,
+                    config
+                        .wed_domains
+                        .iter()
+                        .map(|domain| {
+                            domain
+                                .parse::<HeaderValue>()
+                                .expect("parse web domains into HeaderValue failed")
+                        })
+                        .collect::<Vec<HeaderValue>>(),
                 )
                 .allow_headers(vec![
                     http::header::CONTENT_TYPE,
