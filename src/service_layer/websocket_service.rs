@@ -77,21 +77,21 @@ pub async fn handle_websocket(
     let mut handle2 = tokio::spawn(async move {
         loop {
             tokio::select! {
-                elem = global_subscription.recv() => {
-                    match elem {
-                        Ok(msg) => {
-                            println!("global msg {:?}", msg);
-                            let _ = sender.send(msg.to_string_message()).await;
-                        },
-                        Err(e) => {
-                           println!("eeee 1 {}", e);
-                        },
-                    }
-                }
+                // elem = global_subscription.recv() => {
+                //     println!("global msg {:?}", elem);
+                //     match elem {
+                //         Ok(msg) => {
+                //             let _ = sender.send(msg.to_string_message()).await;
+                //         },
+                //         Err(e) => {
+                //            println!("eeee 1 {}", e);
+                //         },
+                //     }
+                // }
                 elem = personal_subscription.recv() => {
+                    println!("personal msg {:?}", elem);
                     match elem {
                         Ok(msg) => {
-                            // println!("sending personal message {:?}", msg);
                             match msg {
                                 WsMessageToClient::JoinLobby(lobby_id) => {
                                     if lobby_id < NB_LOBBIES { // lobby_id 0 indexed
@@ -107,16 +107,16 @@ pub async fn handle_websocket(
                         }
                     }
                 },
-                elem = lobby_subscription.recv() => {
-                    match elem {
-                        Ok(msg) => {
-                            let _ = sender.send(msg.to_string_message()).await;
-                        },
-                        Err(e) => {
-                        //    println!("eeee 3 {}", e);
-                        }
-                    }
-                },
+                // elem = lobby_subscription.recv() => {
+                //     match elem {
+                //         Ok(msg) => {
+                //             let _ = sender.send(msg.to_string_message()).await;
+                //         },
+                //         Err(e) => {
+                //         //    println!("eeee 3 {}", e);
+                //         }
+                //     }
+                // },
                 else => {
                     println!("BREAK");
                     break
