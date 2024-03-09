@@ -16,7 +16,7 @@ use futures_util::{
 };
 use std::collections::VecDeque;
 use std::sync::Arc;
-use tokio::sync::broadcast::{self, Receiver};
+use tokio::sync::broadcast::{self, Receiver, Sender};
 
 pub async fn handle_websocket(
     player_uuid: String,
@@ -60,7 +60,11 @@ pub async fn handle_websocket(
 
     let mut global_subscription = state.global_broadcast.subscribe();
     let mut personal_subscription = perso_tx.subscribe();
-    let mut lobby_subscription: Receiver<WsMessageToClient> = broadcast::channel(100).1;
+    // let mut lobby_subscription: Receiver<WsMessageToClient> = broadcast::channel(100).1;
+    let (mut lobby_sender, mut lobby_subscription): (
+        Sender<WsMessageToClient>,
+        Receiver<WsMessageToClient>,
+    ) = broadcast::channel(100);
     let cloned_state = state.clone();
     let cloned_player = Player {
         uuid: player.uuid.clone(),
