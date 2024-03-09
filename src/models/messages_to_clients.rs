@@ -92,6 +92,7 @@ pub struct LobbyGeneralUpdate {
 pub struct GameUpdate {
     pub board_game: Vec<Vec<Tile>>,
     pub score_board: HashMap<String, PlayerScore>,
+    pub moves: PlayerMoves,
 }
 
 #[derive(Debug, Clone, Serialize)]

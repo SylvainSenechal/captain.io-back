@@ -81,9 +81,7 @@ pub async fn handle_websocket(
                     match elem {
                         Ok(msg) => {
                             println!("global msg {:?}", msg);
-                            match msg {
-                                _ => sender.send(msg.to_string_message()).await.expect("failed to send to global sub")
-                            };
+                            let _ = sender.send(msg.to_string_message()).await;
                         },
                         Err(e) => {
                            println!("eeee 1 {}", e);
@@ -93,15 +91,15 @@ pub async fn handle_websocket(
                 elem = personal_subscription.recv() => {
                     match elem {
                         Ok(msg) => {
-                            println!("sending personal message {:?}", msg);
+                            // println!("sending personal message {:?}", msg);
                             match msg {
                                 WsMessageToClient::JoinLobby(lobby_id) => {
                                     if lobby_id < NB_LOBBIES { // lobby_id 0 indexed
                                         lobby_subscription = cloned_state.lobbies[lobby_id].read().unwrap().lobby_broadcast.subscribe();
-                                        sender.send(msg.to_string_message()).await.expect("failed to send to global sub");
+                                        let _ = sender.send(msg.to_string_message()).await;
                                     }
                                 },
-                                _ => sender.send(msg.to_string_message()).await.expect("failed to send to personal sub")
+                                _ => {let _ = sender.send(msg.to_string_message()).await;}
                             };
                         },
                         Err(e) => {
@@ -112,10 +110,7 @@ pub async fn handle_websocket(
                 elem = lobby_subscription.recv() => {
                     match elem {
                         Ok(msg) => {
-                            // println!("sending lobby message {:?}", msg);
-                            match msg {
-                                _ => sender.send(msg.to_string_message()).await.expect("failed to send to lobby sub")
-                            };
+                            let _ = sender.send(msg.to_string_message()).await;
                         },
                         Err(e) => {
                         //    println!("eeee 3 {}", e);
@@ -146,8 +141,7 @@ pub async fn handle_websocket(
         .players
         .write()
         .expect("failed to lock players to remove disconnected")
-        .remove(&cloned_player.name)
-        .expect("failed to remove player from players list");
+        .remove(&cloned_player.name);
     global_lobbies_update(state.clone());
 }
 

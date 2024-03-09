@@ -51,6 +51,7 @@ pub struct Tile {
     pub tile_type: TileType,
     pub player_name: Option<String>,
     pub nb_troops: usize,
+    pub hidden: bool,
 }
 impl Default for Tile {
     fn default() -> Self {
@@ -59,6 +60,7 @@ impl Default for Tile {
             tile_type: TileType::Blank,
             player_name: None,
             nb_troops: 0,
+            hidden: true, // todo : has no business being stored here, should only be in returned board, not backend board
         }
     }
 }

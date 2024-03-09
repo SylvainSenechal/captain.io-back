@@ -16,7 +16,7 @@ use std::{
 use tokio::time::{interval, Duration};
 
 use super::{
-    player_service::{Color, PlayerMove},
+    player_service::{Color, PlayerMove, PlayerMoves},
     websocket_service::global_lobbies_update,
 };
 
@@ -77,6 +77,7 @@ fn lunch_game(state: Arc<configs::app_state::AppState>, lobby: &mut Lobby) -> Re
                     tile_type: TileType::Kingdom,
                     nb_troops: 1,
                     player_name: Some(player.name.clone()),
+                    hidden: true,
                 };
             }
             let _ = lobby
@@ -177,6 +178,7 @@ fn tick_game(
                             tile_type: lobby.board_game[attacked_x][attacked_y].tile_type.clone(),
                             player_name: Some(attacker.name.clone()),
                             nb_troops: lobby.board_game[attacker.xy.0][attacker.xy.1].nb_troops - 1,
+                            hidden: true,
                         };
                         lobby.board_game[attacker.xy.0][attacker.xy.1].nb_troops = 1;
                         attacker.xy = (attacked_x, attacked_y);
@@ -192,6 +194,7 @@ fn tick_game(
                             tile_type: lobby.board_game[attacked_x][attacked_y].tile_type.clone(),
                             player_name: Some(attacker.name.clone()),
                             nb_troops: nb_remaining,
+                            hidden: true,
                         };
                         if lobby.board_game[attacked_x][attacked_y].tile_type == TileType::Kingdom {
                             lobby.board_game[attacked_x][attacked_y].tile_type = TileType::Castle;
@@ -222,6 +225,7 @@ fn tick_game(
                             tile_type: lobby.board_game[attacked_x][attacked_y].tile_type.clone(),
                             player_name: Some(attacker.name.clone()),
                             nb_troops: nb_remaining,
+                            hidden: true,
                         };
                         attacker.xy = (attacked_x, attacked_y);
                     }
@@ -239,13 +243,75 @@ fn tick_game(
             });
         }
     }
-    let _ = lobby
-        .lobby_broadcast
-        .send(WsMessageToClient::GameUpdate(GameUpdate {
-            board_game: lobby.board_game.clone(),
-            score_board: scoreboard,
-            // todo : send Option<String> winnerIs directly here ?
-        }));
+    for (_, player) in players.iter() {
+        let mut personal_board_game: Vec<Vec<Tile>> = vec![];
+        let width = lobby.board_game.len();
+        let height = lobby.board_game[0].len();
+        for i in 0..width {
+            let mut column = vec![];
+            for j in 0..height {
+                let hidden_type = match lobby.board_game[i][j].tile_type {
+                    TileType::Blank => TileType::Blank,
+                    TileType::Kingdom => TileType::Mountain,
+                    TileType::Castle => TileType::Mountain,
+                    TileType::Mountain => TileType::Mountain,
+                };
+                column.push(Tile {
+                    status: TileStatus::Empty,
+                    tile_type: hidden_type,
+                    player_name: None,
+                    nb_troops: 0,
+                    hidden: true,
+                })
+            }
+            personal_board_game.push(column);
+        }
+        for i in 0..width {
+            for j in 0..height {
+                if let Some(name) = lobby.board_game[i][j].player_name.clone() {
+                    if name == player.name {
+                        let min_w = i.saturating_sub(1);
+                        let min_h = j.saturating_sub(1);
+                        let max_w = (i + 1).min(width - 1);
+                        let max_h = (j + 1).min(height - 1);
+
+                        personal_board_game[min_w][min_h] = lobby.board_game[min_w][min_h].clone();
+                        personal_board_game[min_w][j] = lobby.board_game[min_w][j].clone();
+                        personal_board_game[min_w][max_h] = lobby.board_game[min_w][max_h].clone();
+                        personal_board_game[i][min_h] = lobby.board_game[i][min_h].clone();
+                        personal_board_game[i][j] = lobby.board_game[i][j].clone();
+                        personal_board_game[i][max_h] = lobby.board_game[i][max_h].clone();
+                        personal_board_game[max_w][min_h] = lobby.board_game[max_w][min_h].clone();
+                        personal_board_game[max_w][j] = lobby.board_game[max_w][j].clone();
+                        personal_board_game[max_w][max_h] = lobby.board_game[max_w][max_h].clone();
+
+                        personal_board_game[min_w][min_h].hidden = false;
+                        personal_board_game[min_w][j].hidden = false;
+                        personal_board_game[min_w][max_h].hidden = false;
+                        personal_board_game[i][min_h].hidden = false;
+                        personal_board_game[i][j].hidden = false;
+                        personal_board_game[i][max_h].hidden = false;
+                        personal_board_game[max_w][min_h].hidden = false;
+                        personal_board_game[max_w][j].hidden = false;
+                        personal_board_game[max_w][max_h].hidden = false;
+                    }
+                }
+            }
+        }
+
+        let _ = player
+            .personal_tx
+            .send(WsMessageToClient::GameUpdate(GameUpdate {
+                board_game: personal_board_game,
+                // board_game: lobby.board_game.clone(),
+                score_board: scoreboard.clone(),
+                moves: PlayerMoves {
+                    queued_moves: player.queued_moves.clone(),
+                    xy: player.xy,
+                },
+            }));
+    }
+
     if remaining_players.len() == 1 {
         let _ = lobby
             .lobby_broadcast
