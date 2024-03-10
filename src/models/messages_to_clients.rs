@@ -1,11 +1,11 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap};
 
 use axum::extract::ws::Message;
 use serde::Serialize;
 
 use crate::{
     configs::app_state::{ChatMessage, LobbyStatus, Tile},
-    service_layer::player_service::{Color, PlayerMove, PlayerMoves},
+    service_layer::player_service::{Color, PlayerMoves},
 };
 
 #[derive(Debug, Clone)]

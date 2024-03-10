@@ -19,10 +19,9 @@ use tower_http::cors::CorsLayer;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tower_http::cors::Any;
+
 
 use crate::{
-    models::messages_to_clients::WsMessageToClient,
     service_layer::websocket_service::handle_websocket,
 };
 
@@ -88,7 +87,7 @@ async fn main() {
         .await
         .unwrap();
 
-    let game_loop_handler =
+    let _game_loop_handler =
         tokio::spawn(async { service_layer::game_service::game_loop(app_state).await });
 
     axum::serve(listener, app).await.unwrap();

@@ -1,6 +1,6 @@
 use crate::configs;
-use crate::configs::app_state::{ChatMessage, LobbyStatus, Tile, TileStatus, TileType};
-use crate::constants::constants::{DELAY_FOR_GAMESTART_SEC, MAX_QUEUED_MOVES, NB_LOBBIES};
+use crate::configs::app_state::{ChatMessage, LobbyStatus};
+use crate::constants::{DELAY_FOR_GAMESTART_SEC, MAX_QUEUED_MOVES, NB_LOBBIES};
 use crate::data_access_layer::player_dal::{self, Player};
 use crate::models::messages_from_clients::ClientCommand;
 use crate::models::{
@@ -61,7 +61,7 @@ pub async fn handle_websocket(
     let mut global_subscription = state.global_broadcast.subscribe();
     let mut personal_subscription = perso_tx.subscribe();
     // let mut lobby_subscription: Receiver<WsMessageToClient> = broadcast::channel(100).1;
-    let (mut lobby_sender, mut lobby_subscription): (
+    let (_lobby_sender, mut lobby_subscription): (
         Sender<WsMessageToClient>,
         Receiver<WsMessageToClient>,
     ) = broadcast::channel(100);
@@ -284,7 +284,7 @@ async fn receive(
                                     .unwrap()
                                     .lobby_broadcast
                                     .send(WsMessageToClient::LobbyChatNewMessage(ChatMessage {
-                                        message: message,
+                                        message,
                                     }))
                                     .expect("failed to notify of new lobby message");
                             }
@@ -337,7 +337,7 @@ fn global_chat_new_message(state: Arc<configs::app_state::AppState>, message: St
     state
         .global_broadcast
         .send(WsMessageToClient::GlobalChatNewMessage(ChatMessage {
-            message: message,
+            message,
         }))
         .expect("global chat new message failed");
 }

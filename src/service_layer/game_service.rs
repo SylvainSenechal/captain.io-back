@@ -4,12 +4,11 @@ use crate::{
         app_state::{Lobby, LobbyStatus, Tile, TileStatus, TileType},
     },
     models::messages_to_clients::{GameUpdate, PlayerScore, WsMessageToClient},
-    service_layer::websocket_service,
 };
 use chrono::Utc;
 use rand::Rng;
 use std::{
-    clone,
+    cmp::Ordering,
     collections::{HashMap, HashSet, VecDeque},
     sync::Arc,
 };
@@ -29,7 +28,7 @@ pub async fn game_loop(state: Arc<configs::app_state::AppState>) {
     let mut interval = interval(Duration::from_millis(500));
     loop {
         interval.tick().await; // The first tick completes immediately
-        tick = tick + 1;
+        tick += 1;
         for mutex_lobby in state.lobbies.iter() {
             let mut lobby = mutex_lobby.write().expect("failed to lock lobby");
             match lobby.status {
@@ -84,7 +83,7 @@ fn lunch_game(state: Arc<configs::app_state::AppState>, lobby: &mut Lobby) -> Re
                 .lobby_broadcast
                 .send(WsMessageToClient::GameStarted(lobby.lobby_id));
 
-            return Ok(true);
+            Ok(true)
         } else {
             Ok(false)
         }
@@ -113,7 +112,7 @@ fn tick_game(
                     TileType::Castle => position.nb_troops += 2,
                     TileType::Mountain => (),
                 },
-                _ => (),
+                TileStatus::Empty => (),
             }
         }
     }
@@ -239,7 +238,7 @@ fn tick_game(
         if let Some(occupier_name) = position.player_name.clone() {
             scoreboard.entry(occupier_name).and_modify(|score| {
                 score.total_positions += 1;
-                score.total_troops = score.total_troops + position.nb_troops;
+                score.total_troops += position.nb_troops;
             });
         }
     }
@@ -377,7 +376,7 @@ enum IssueAssault {
 
 fn resolve_assault(
     real_attacker_name: String,
-    board: &Vec<Vec<Tile>>,
+    board: &[Vec<Tile>],
     attacker_xy: (usize, usize),
     defender_xy: (usize, usize),
 ) -> IssueAssault {
@@ -409,29 +408,25 @@ fn resolve_assault(
     }
 
     match defending_board.status {
-        TileStatus::Occupied => {
-            if nb_attacking_troops == nb_defending_troops {
-                return IssueAssault::Tie;
-            } else if nb_attacking_troops > nb_defending_troops {
-                return IssueAssault::Victory(
-                    defending_board
-                        .player_name
-                        .clone()
-                        .expect("no defender name on attacked tile"),
-                    nb_attacking_troops - nb_defending_troops,
-                );
-            } else {
-                return IssueAssault::Defeat(nb_defending_troops - nb_attacking_troops);
-            }
-        }
+        TileStatus::Occupied => match nb_attacking_troops.cmp(&nb_defending_troops) {
+            Ordering::Equal => IssueAssault::Tie,
+            Ordering::Greater => IssueAssault::Victory(
+                defending_board
+                    .player_name
+                    .clone()
+                    .expect("no defender name on attacked tile"),
+                nb_attacking_troops - nb_defending_troops,
+            ),
+            Ordering::Less => IssueAssault::Defeat(nb_defending_troops - nb_attacking_troops),
+        },
         // todo : redundant code between 2 arms
         TileStatus::Empty if defending_board.tile_type == TileType::Castle => {
-            if nb_attacking_troops == nb_defending_troops {
-                return IssueAssault::Tie;
-            } else if nb_attacking_troops > nb_defending_troops {
-                return IssueAssault::VictoryCastle(nb_attacking_troops - nb_defending_troops);
-            } else {
-                return IssueAssault::Defeat(nb_defending_troops - nb_attacking_troops);
+            match nb_attacking_troops.cmp(&nb_defending_troops) {
+                Ordering::Equal => IssueAssault::Tie,
+                Ordering::Greater => {
+                    IssueAssault::VictoryCastle(nb_attacking_troops - nb_defending_troops)
+                }
+                Ordering::Less => IssueAssault::Defeat(nb_defending_troops - nb_attacking_troops),
             }
         }
         TileStatus::Empty => IssueAssault::ConquerEmpty,

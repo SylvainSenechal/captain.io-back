@@ -20,7 +20,7 @@ pub fn response_ok<T: Serialize>(
         Json(ApiResponse {
             message: None,
             code: StatusCode::OK.as_u16(),
-            data: data,
+            data,
         }),
     ))
 }
@@ -34,7 +34,7 @@ pub fn response_ok_with_message<T: Serialize>(
         Json(ApiResponse {
             message: Some(message),
             code: StatusCode::OK.as_u16(),
-            data: data,
+            data,
         }),
     ))
 }

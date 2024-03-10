@@ -1,5 +1,5 @@
 use crate::configs::app_state::AppState;
-use crate::constants::constants::{MINIMUM_PLAYERNAME_LENGTH, PLAYER_NAMES};
+use crate::constants::{MINIMUM_PLAYERNAME_LENGTH, PLAYER_NAMES};
 use crate::custom_errors::service_errors::ServiceError;
 use crate::custom_errors::sqlite_errors::SqliteError;
 use crate::data_access_layer::{self, player_dal};
@@ -73,12 +73,11 @@ pub enum Color {
 }
 
 impl Color {
-    pub fn pick_available_color(unavailable_colors: &Vec<Color>) -> Color {
+    pub fn pick_available_color(unavailable_colors: &[Color]) -> Color {
         const COLORS: [Color; 3] = [Color::Red, Color::Blue, Color::Pink];
         let new_color = COLORS
             .iter()
-            .filter(|&color| !unavailable_colors.contains(color))
-            .next();
+            .find(|&color| !unavailable_colors.contains(color));
         new_color.expect("could not find a new color").clone()
     }
 }
@@ -143,7 +142,7 @@ fn internal_is_valid_playername(
         });
     }
 
-    match data_access_layer::player_dal::get_player_by_name(&state, playername.clone()) {
+    match data_access_layer::player_dal::get_player_by_name(state, playername.clone()) {
         Ok(_) => Ok(IsValidPlayernameResponse {
             is_valid: false,
             reason: Some("player name already exists".to_string()),
@@ -195,7 +194,7 @@ pub fn generate_available_playername(state: &Arc<AppState>) -> Result<String, Se
             name.expect("failed to pick a random playername"),
             rng.gen_range(0..100000)
         );
-        match data_access_layer::player_dal::get_player_by_name(&state, full_playername.clone()) {
+        match data_access_layer::player_dal::get_player_by_name(state, full_playername.clone()) {
             Ok(_) => println!(
                 "player {} already exists, trying to generate another name",
                 full_playername

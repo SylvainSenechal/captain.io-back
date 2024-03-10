@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     sync::{Arc, RwLock},
 };
 
@@ -9,9 +9,8 @@ use rand::Rng;
 use serde::Serialize;
 use tokio::sync::broadcast;
 
-use crate::constants::constants::DATABASE_NAME;
 use crate::service_layer::player_service::Player;
-use crate::{constants::constants, models::messages_to_clients::WsMessageToClient};
+use crate::{constants, models::messages_to_clients::WsMessageToClient};
 #[derive(Debug)]
 pub struct AppState {
     pub connection: Pool<SqliteConnectionManager>,
@@ -81,17 +80,17 @@ pub enum TileType {
 impl Lobby {
     fn new(lobby_id: usize, player_capacity: usize) -> Self {
         let mut lobby = Lobby {
-            lobby_id: lobby_id,
+            lobby_id,
             status: LobbyStatus::AwaitingPlayers,
             next_starting_time: None,
-            player_capacity: player_capacity,
+            player_capacity,
             lobby_broadcast: broadcast::channel(10).0,
             players: HashMap::new(),
             messages: vec![],
             board_game: vec![],
         };
         lobby.generate_new_board();
-        return lobby;
+        lobby
     }
     pub fn generate_new_board(&mut self) {
         let mut rng = rand::thread_rng();
@@ -125,7 +124,7 @@ impl Lobby {
 
 impl AppState {
     pub fn new() -> Arc<AppState> {
-        let manager = SqliteConnectionManager::file(DATABASE_NAME);
+        let manager = SqliteConnectionManager::file(constants::DATABASE_NAME);
         let pool = r2d2::Pool::builder()
             .max_size(100)
             .build(manager)
@@ -141,7 +140,7 @@ impl AppState {
             global_broadcast: broadcast::channel(100).0,
             global_chat_messages: RwLock::new(vec![]),
             players: RwLock::new(HashMap::new()),
-            lobbies: lobbies,
+            lobbies,
         })
     }
 }
