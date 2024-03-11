@@ -9,7 +9,6 @@ pub enum ClientCommand {
     Ping,
 }
 
-// todo : handle expect errors
 impl std::str::FromStr for ClientCommand {
     type Err = ();
     fn from_str(msg: &str) -> Result<ClientCommand, Self::Err> {
@@ -17,31 +16,23 @@ impl std::str::FromStr for ClientCommand {
 
         if let Some(command_type) = commands.next() {
             match command_type {
-                "/move" => {
-                    let new_move = commands
-                        .next()
-                        .expect("no new move type found")
-                        .parse::<PlayerMove>()
-                        .expect("failed to convert string to player move");
-                    Ok(ClientCommand::Move(new_move))
-                }
-                "/joinLobby" => Ok(ClientCommand::JoinLobby(
-                    commands
-                        .next()
-                        .expect("failed to fined en of command")
-                        .parse::<usize>()
-                        .expect("couldnt parse lobby id string to usize"),
-                )),
+                "/move" => match commands.next().ok_or(())?.parse::<PlayerMove>() {
+                    Ok(new_move) => Ok(ClientCommand::Move(new_move)),
+                    Err(_) => Err(()),
+                },
+                "/joinLobby" => match commands.next().ok_or(())?.parse::<usize>() {
+                    Ok(lob) => Ok(ClientCommand::JoinLobby(lob)),
+                    Err(_) => Err(()),
+                },
                 "/ping" => Ok(ClientCommand::Ping),
-                "/sendGlobalMessage" => Ok(ClientCommand::SendGlobalMessage(
-                    commands
-                        .next()
-                        .expect("failed to fined en of command")
-                        .to_string(),
-                )),
-                "/sendLobbyMessage" => Ok(ClientCommand::SendLobbyMessage(
-                    commands.next().expect("no lobby message found").to_string(),
-                )),
+                "/sendGlobalMessage" => {
+                    let new_message = commands.next().ok_or(())?;
+                    Ok(ClientCommand::SendGlobalMessage(new_message.to_string()))
+                }
+                "/sendLobbyMessage" => {
+                    let new_message = commands.next().ok_or(())?;
+                    Ok(ClientCommand::SendLobbyMessage(new_message.to_string()))
+                }
                 _ => Err(()),
             }
         } else {

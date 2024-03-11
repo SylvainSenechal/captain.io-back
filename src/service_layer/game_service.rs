@@ -3,6 +3,7 @@ use crate::{
         self,
         app_state::{Lobby, LobbyStatus, Tile, TileStatus, TileType},
     },
+    constants::{TICK_BLANK, TICK_CASTLE, TICK_GAME_INTERVAL_MS, TICK_KINGDOM},
     models::messages_to_clients::{GameUpdate, PlayerScore, WsMessageToClient},
 };
 use chrono::Utc;
@@ -19,13 +20,11 @@ use super::{
     websocket_service::global_lobbies_update,
 };
 
-// todo : handle when tip of queue is stolen
-
 // todo : becareful if user join lobby and then quit before start : remove their game position
 // + test reload during the game
 pub async fn game_loop(state: Arc<configs::app_state::AppState>) {
     let mut tick = 0;
-    let mut interval = interval(Duration::from_millis(500));
+    let mut interval = interval(Duration::from_millis(TICK_GAME_INTERVAL_MS));
     loop {
         interval.tick().await; // The first tick completes immediately
         tick += 1;
@@ -33,15 +32,12 @@ pub async fn game_loop(state: Arc<configs::app_state::AppState>) {
             let mut lobby = mutex_lobby.write().expect("failed to lock lobby");
             match lobby.status {
                 LobbyStatus::AwaitingPlayers => (),
-                LobbyStatus::StartingSoon => match lunch_game(state.clone(), &mut lobby) {
-                    Ok(need_global_lobbies_update) => {
-                        if need_global_lobbies_update {
-                            drop(lobby); // global lobbies update needs to take ownership of all the lobbies
-                            global_lobbies_update(state.clone());
-                        }
+                LobbyStatus::StartingSoon => {
+                    if lunch_game(state.clone(), &mut lobby) {
+                        drop(lobby); // global lobbies update needs to take ownership of all the lobbies
+                        global_lobbies_update(state.clone());
                     }
-                    Err(err) => println!("err starting lobby: {}", err), // todo : starting time is non existent, free lobby and player
-                },
+                }
                 LobbyStatus::InGame => {
                     if let Ok(is_game_finished) = tick_game(&mut lobby, tick, state.clone()) {
                         if is_game_finished {
@@ -56,64 +52,53 @@ pub async fn game_loop(state: Arc<configs::app_state::AppState>) {
     }
 }
 
-fn lunch_game(state: Arc<configs::app_state::AppState>, lobby: &mut Lobby) -> Result<bool, String> {
-    if let Some(starting_time) = lobby.next_starting_time {
-        if starting_time - Utc::now().timestamp() <= 0 {
-            lobby.status = LobbyStatus::InGame;
-            let mut unavailable_colors = vec![];
-            let mut players = state.players.write().expect("failed to lock player");
-            for (player_name, _uuid) in lobby.players.iter() {
-                let new_player_color = Color::pick_available_color(&unavailable_colors);
-                let player = players
-                    .get_mut(&player_name.clone())
-                    .expect("failed to get player");
-                player.queued_moves = VecDeque::new();
-                player.color = new_player_color.clone();
-                unavailable_colors.push(new_player_color);
-                player.xy = pick_available_starting_coordinates(&lobby.board_game);
-                lobby.board_game[player.xy.0][player.xy.1] = Tile {
-                    status: TileStatus::Occupied,
-                    tile_type: TileType::Kingdom,
-                    nb_troops: 1,
-                    player_name: Some(player.name.clone()),
-                    hidden: true,
-                };
-            }
-            let _ = lobby
-                .lobby_broadcast
-                .send(WsMessageToClient::GameStarted(lobby.lobby_id));
-
-            Ok(true)
-        } else {
-            Ok(false)
+fn lunch_game(state: Arc<configs::app_state::AppState>, lobby: &mut Lobby) -> bool {
+    if lobby.next_starting_time - Utc::now().timestamp() <= 0 {
+        lobby.status = LobbyStatus::InGame;
+        let mut unavailable_colors = vec![];
+        let mut players = state.players.write().expect("failed to lock player");
+        for (player_name, _uuid) in lobby.players.iter() {
+            let new_player_color = Color::pick_available_color(&unavailable_colors);
+            let player = players
+                .get_mut(&player_name.clone())
+                .expect("failed to get player");
+            player.queued_moves = VecDeque::new();
+            player.color = new_player_color.clone();
+            unavailable_colors.push(new_player_color);
+            player.xy = pick_available_starting_coordinates(&lobby.board_game);
+            lobby.board_game[player.xy.0][player.xy.1] = Tile {
+                status: TileStatus::Occupied,
+                tile_type: TileType::Kingdom,
+                nb_troops: 1,
+                player_name: Some(player.name.clone()),
+                hidden: true,
+            };
         }
+        let _ = lobby
+            .lobby_broadcast
+            .send(WsMessageToClient::GameStarted(lobby.lobby_id));
+
+        true
     } else {
-        Err(format!(
-            "lobby is not in Starting soon state, state:{:?}",
-            lobby.status
-        ))
+        false
     }
 }
 
-// todo  full hexagon circle : ++ generation bonus
-// todo max move queue player : 20
 fn tick_game(
     lobby: &mut Lobby,
     tick: usize,
     state: Arc<configs::app_state::AppState>,
 ) -> Result<bool, String> {
     for position in lobby.board_game.iter_mut().flatten() {
-        if tick % 5 == 0 {
-            // todo : use const
-            match position.status {
-                TileStatus::Occupied => match position.tile_type {
-                    TileType::Blank => position.nb_troops += 1,
-                    TileType::Kingdom => position.nb_troops += 5,
-                    TileType::Castle => position.nb_troops += 2,
-                    TileType::Mountain => (),
-                },
-                TileStatus::Empty => (),
-            }
+        match position.status {
+            TileStatus::Occupied => match position.tile_type {
+                TileType::Kingdom if tick % TICK_KINGDOM == 0 => position.nb_troops += 1,
+                TileType::Castle if tick % TICK_CASTLE == 0 => position.nb_troops += 1,
+                TileType::Blank if tick % TICK_BLANK == 0 => position.nb_troops += 1,
+                TileType::Mountain => (),
+                _ => (),
+            },
+            TileStatus::Empty => (),
         }
     }
     let mut players = state.players.write().expect("failed to lock players");
@@ -169,7 +154,6 @@ fn tick_game(
                         lobby.board_game[attacked_x][attacked_y].nb_troops +=
                             lobby.board_game[attacker.xy.0][attacker.xy.1].nb_troops - 1;
                         lobby.board_game[attacker.xy.0][attacker.xy.1].nb_troops = 1;
-                        attacker.xy = (attacked_x, attacked_y);
                     }
                     IssueAssault::ConquerEmpty => {
                         lobby.board_game[attacked_x][attacked_y] = Tile {
@@ -180,7 +164,6 @@ fn tick_game(
                             hidden: true,
                         };
                         lobby.board_game[attacker.xy.0][attacker.xy.1].nb_troops = 1;
-                        attacker.xy = (attacked_x, attacked_y);
                     }
                     IssueAssault::Tie => {
                         lobby.board_game[attacker.xy.0][attacker.xy.1].nb_troops = 1;
@@ -211,7 +194,6 @@ fn tick_game(
                                 }
                             }
                         }
-                        attacker.xy = (attacked_x, attacked_y);
                     }
                     IssueAssault::Defeat(defensive_losses) => {
                         lobby.board_game[attacker.xy.0][attacker.xy.1].nb_troops = 1;
@@ -226,9 +208,10 @@ fn tick_game(
                             nb_troops: nb_remaining,
                             hidden: true,
                         };
-                        attacker.xy = (attacked_x, attacked_y);
                     }
                 }
+                attacker.xy = (attacked_x, attacked_y);
+
                 println!("next move: {:?}", next_move);
             }
         }
@@ -419,7 +402,6 @@ fn resolve_assault(
             ),
             Ordering::Less => IssueAssault::Defeat(nb_defending_troops - nb_attacking_troops),
         },
-        // todo : redundant code between 2 arms
         TileStatus::Empty if defending_board.tile_type == TileType::Castle => {
             match nb_attacking_troops.cmp(&nb_defending_troops) {
                 Ordering::Equal => IssueAssault::Tie,

@@ -1,4 +1,4 @@
-use std::collections::{HashMap};
+use std::collections::HashMap;
 
 use axum::extract::ws::Message;
 use serde::Serialize;
@@ -85,7 +85,7 @@ pub struct LobbyGeneralUpdate {
     pub player_capacity: usize,
     pub nb_connected: usize,
     pub status: LobbyStatus,
-    pub next_starting_time: Option<i64>, // unix timestamp seconds
+    pub next_starting_time: i64, // unix timestamp seconds
 }
 
 #[derive(Debug, Clone, Serialize)]

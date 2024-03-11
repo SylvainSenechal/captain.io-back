@@ -9,8 +9,8 @@ use rand::Rng;
 use serde::Serialize;
 use tokio::sync::broadcast;
 
-use crate::service_layer::player_service::Player;
 use crate::{constants, models::messages_to_clients::WsMessageToClient};
+use crate::{constants::YEAR_2128_TIMESTAMP, service_layer::player_service::Player};
 #[derive(Debug)]
 pub struct AppState {
     pub connection: Pool<SqliteConnectionManager>,
@@ -29,7 +29,7 @@ pub struct ChatMessage {
 pub struct Lobby {
     pub lobby_id: usize,
     pub status: LobbyStatus,
-    pub next_starting_time: Option<i64>, // unix timestamp seconds
+    pub next_starting_time: i64, // unix timestamp seconds
     pub player_capacity: usize,
     pub lobby_broadcast: broadcast::Sender<WsMessageToClient>,
     pub players: HashMap<String, String>, // name->uuid
@@ -82,7 +82,7 @@ impl Lobby {
         let mut lobby = Lobby {
             lobby_id,
             status: LobbyStatus::AwaitingPlayers,
-            next_starting_time: None,
+            next_starting_time: YEAR_2128_TIMESTAMP,
             player_capacity,
             lobby_broadcast: broadcast::channel(10).0,
             players: HashMap::new(),

@@ -30,7 +30,7 @@ pub fn response_ok_with_message<T: Serialize>(
     message: String,
 ) -> Result<(StatusCode, Json<ApiResponse<T>>), ServiceError> {
     Ok((
-        StatusCode::OK,
+        StatusCode::BAD_REQUEST,
         Json(ApiResponse {
             message: Some(message),
             code: StatusCode::OK.as_u16(),

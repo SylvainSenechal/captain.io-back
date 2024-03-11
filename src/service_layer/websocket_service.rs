@@ -1,6 +1,8 @@
 use crate::configs;
 use crate::configs::app_state::{ChatMessage, LobbyStatus};
-use crate::constants::{DELAY_FOR_GAMESTART_SEC, MAX_QUEUED_MOVES, NB_LOBBIES};
+use crate::constants::{
+    DELAY_FOR_GAMESTART_SEC, DISPLAY_N_LAST_MESSAGES, MAX_QUEUED_MOVES, NB_LOBBIES,
+};
 use crate::data_access_layer::player_dal::{self, Player};
 use crate::models::messages_from_clients::ClientCommand;
 use crate::models::{
@@ -19,26 +21,15 @@ use std::sync::Arc;
 use tokio::sync::broadcast::{self, Receiver, Sender};
 
 pub async fn handle_websocket(
-    player_uuid: String,
+    player: Player,
     socket: WebSocket,
     state: Arc<configs::app_state::AppState>,
 ) {
     let (mut sender, mut receiver) = socket.split();
 
     // todo : return / timeout after x seconds
-    // todo : use multiple sender, one receiver ?
-    let perso_tx = broadcast::channel(100).0;
+    let (perso_tx, mut personal_subscription) = tokio::sync::mpsc::unbounded_channel();
 
-    let player_in_db = player_dal::get_player_by_uuid(&state, player_uuid.clone());
-    if let Err(err) = player_in_db {
-        println!(
-            "handle_websocket, can't find player with uuid={}, err={:?} ",
-            player_uuid, err
-        );
-        return;
-    }
-    let player = player_in_db.unwrap();
-    // todo : handle if player is already inside (handle double windows opened)
     state
         .players
         .write()
@@ -59,8 +50,6 @@ pub async fn handle_websocket(
     println!("CURRENT PLAYERS {:?}", state.players);
 
     let mut global_subscription = state.global_broadcast.subscribe();
-    let mut personal_subscription = perso_tx.subscribe();
-    // let mut lobby_subscription: Receiver<WsMessageToClient> = broadcast::channel(100).1;
     let (_lobby_sender, mut lobby_subscription): (
         Sender<WsMessageToClient>,
         Receiver<WsMessageToClient>,
@@ -75,14 +64,14 @@ pub async fn handle_websocket(
     });
 
     global_lobbies_update(state.clone());
-    global_chat_sync(state.clone());
+    global_chat_sync(perso_tx, state.clone());
 
     let cloned_state = state.clone();
     let mut handle2 = tokio::spawn(async move {
         loop {
             tokio::select! {
                 elem = global_subscription.recv() => {
-                    println!("global msg {:?}", elem);
+                    // println!("global msg {:?}", elem);
                     match elem {
                         Ok(msg) => {
                             let _ = sender.send(msg.to_string_message()).await;
@@ -93,7 +82,7 @@ pub async fn handle_websocket(
                     }
                 }
                 elem = lobby_subscription.recv() => {
-                    println!("lobby msg {:?}", elem);
+                    // println!("lobby msg {:?}", elem);
                     match elem {
                         Ok(msg) => {
                             let _ = sender.send(msg.to_string_message()).await;
@@ -104,9 +93,9 @@ pub async fn handle_websocket(
                     }
                 },
                 elem = personal_subscription.recv() => {
-                    println!("personal msg {:?}", elem);
+                    // println!("personal msg {:?}", elem);
                     match elem {
-                        Ok(msg) => {
+                        Some(msg) => {
                             match msg {
                                 WsMessageToClient::JoinLobby(lobby_id) => {
                                     if lobby_id < NB_LOBBIES { // lobby_id 0 indexed
@@ -117,8 +106,8 @@ pub async fn handle_websocket(
                                 _ => {let _ = sender.send(msg.to_string_message()).await;}
                             };
                         },
-                        Err(e) => {
-                           println!("eeee 3 {}", e);
+                        None => {
+                           println!("eeee 3 ");
                         }
                     }
                 },
@@ -220,7 +209,7 @@ async fn receive(
                                     println!("lobby {} is starting", lobby_to_join.lobby_id);
                                     lobby_to_join.status = LobbyStatus::StartingSoon;
                                     lobby_to_join.next_starting_time =
-                                        Some(Utc::now().timestamp() + DELAY_FOR_GAMESTART_SEC);
+                                        Utc::now().timestamp() + DELAY_FOR_GAMESTART_SEC;
                                 }
                                 drop(lobby_to_join);
                                 player
@@ -232,11 +221,23 @@ async fn receive(
                                     .send(WsMessageToClient::LobbyChatSync(
                                         state.lobbies[join_lobby_id]
                                             .read()
-                                            .expect("failed to lock lobby")
+                                            .expect("failed to lock lobby chat")
                                             .messages
-                                            .to_owned(),
+                                            .clone()
+                                            .into_iter()
+                                            .skip(
+                                                state.lobbies[join_lobby_id]
+                                                    .read()
+                                                    .expect("failed to lock lobby chat")
+                                                    .messages
+                                                    .len()
+                                                    .saturating_sub(DISPLAY_N_LAST_MESSAGES),
+                                            )
+                                            .take(DISPLAY_N_LAST_MESSAGES)
+                                            .collect::<Vec<ChatMessage>>(),
                                     ))
-                                    .expect("failed to notify current lobby chat");
+                                    .expect("lobby chat sync failed");
+
                                 drop(players); // unlock players because we are trying to lock it in global_lobby_update
                                 global_lobbies_update(state.clone());
                             }
@@ -321,15 +322,28 @@ pub fn global_lobbies_update(state: Arc<configs::app_state::AppState>) {
         .expect("global lobbies update failed");
 }
 
-fn global_chat_sync(state: Arc<configs::app_state::AppState>) {
-    state
-        .global_broadcast // todo : sync chat should be personnal, no need to sync for all player when a single player joins ??
+fn global_chat_sync(
+    perso_tx: tokio::sync::mpsc::UnboundedSender<WsMessageToClient>,
+    state: Arc<configs::app_state::AppState>,
+) {
+    perso_tx
         .send(WsMessageToClient::GlobalChatSync(
             state
                 .global_chat_messages
                 .read()
                 .expect("failed to lock global chat")
-                .to_owned(),
+                .clone()
+                .into_iter()
+                .skip(
+                    state
+                        .global_chat_messages
+                        .read()
+                        .expect("failed to lock global chat")
+                        .len()
+                        .saturating_sub(DISPLAY_N_LAST_MESSAGES),
+                )
+                .take(DISPLAY_N_LAST_MESSAGES)
+                .collect::<Vec<ChatMessage>>(),
         ))
         .expect("global chat sync failed");
 }

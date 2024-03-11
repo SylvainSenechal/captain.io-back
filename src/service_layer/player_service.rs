@@ -4,8 +4,10 @@ use crate::custom_errors::service_errors::ServiceError;
 use crate::custom_errors::sqlite_errors::SqliteError;
 use crate::data_access_layer::{self, player_dal};
 use crate::models::messages_to_clients::WsMessageToClient;
-use crate::requests::requests::CreatePlayerRequest;
-use crate::responses::responses::IsValidPlayernameResponse;
+use crate::requests::requests::{
+    CreatePlayerRequest, IsValidPlayernameRequest, IsValidPlayernameResponse,
+    RequestNewPlayerResponse, UpdateNameRequest,
+};
 use crate::utilities::responses::{response_ok, ApiResponse};
 use axum::{
     extract::{Path, State},
@@ -19,35 +21,17 @@ use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::sync::Arc;
 use tokio::sync::broadcast;
+use tokio::sync::mpsc;
 
 #[derive(Debug)]
 pub struct Player {
-    // todo : change to different folder ?
     pub uuid: String,
     pub name: String,
-    pub personal_tx: broadcast::Sender<WsMessageToClient>,
+    pub personal_tx: mpsc::UnboundedSender<WsMessageToClient>,
     pub playing_in_lobby: Option<usize>,
     pub queued_moves: VecDeque<PlayerMove>,
     pub xy: (usize, usize),
     pub color: Color,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct RequestNewPlayerResponse {
-    // todo : move to another folder ?
-    uuid: String,
-    name: String,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct UpdateNameRequest {
-    // todo : move to another folder ?
-    name: String,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct IsValidPlayernameRequest {
-    name: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
