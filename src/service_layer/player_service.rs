@@ -114,6 +114,7 @@ fn internal_is_valid_playername(
     player_name: String,
     state: &Arc<AppState>,
 ) -> Result<IsValidPlayernameResponse, ServiceError> {
+    // todo : max len too ?
     // todo : add banword list
     if player_name.chars().count() < MINIMUM_PLAYERNAME_LENGTH {
         return Ok(IsValidPlayernameResponse {

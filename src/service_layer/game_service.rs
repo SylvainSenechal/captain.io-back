@@ -215,10 +215,18 @@ fn tick_game(
 
     for position in lobby.board_game.iter().flatten() {
         if let Some(occupier_uuid) = position.player_uuid.clone() {
-            scoreboard.entry(occupier_uuid).and_modify(|score| {
-                score.total_positions += 1;
-                score.total_troops += position.nb_troops;
-            });
+            scoreboard
+                .entry(
+                    lobby
+                        .players
+                        .get(&occupier_uuid)
+                        .expect("couldn't find player")
+                        .into(),
+                )
+                .and_modify(|score| {
+                    score.total_positions += 1;
+                    score.total_troops += position.nb_troops;
+                });
         }
     }
     for (_, player) in players.iter() {

@@ -9,8 +9,14 @@ use rand::Rng;
 use serde::Serialize;
 use tokio::sync::broadcast;
 
-use crate::{constants, models::messages_to_clients::WsMessageToClient};
-use crate::{constants::YEAR_2128_TIMESTAMP, service_layer::player_service::Player};
+use crate::{
+    constants::{self, NB_CASTLES},
+    models::messages_to_clients::WsMessageToClient,
+};
+use crate::{
+    constants::{NB_MOUTAINS, YEAR_2128_TIMESTAMP},
+    service_layer::player_service::Player,
+};
 
 #[derive(Debug)]
 pub struct AppState {
@@ -93,8 +99,9 @@ impl Lobby {
     }
     pub fn generate_new_board(&mut self) {
         let mut rng = rand::thread_rng();
-        let width = rng.gen_range(5..8);
-        let height = rng.gen_range(15..20);
+        let width = rng.gen_range(20..25);
+        let height = rng.gen_range(20..25);
+        // todo : const
         self.board_game = vec![];
         for _ in 0..width {
             let mut column = vec![];
@@ -103,14 +110,14 @@ impl Lobby {
             }
             self.board_game.push(column)
         }
-        for _ in 0..10 {
+        for _ in 0..NB_MOUTAINS {
             let x = rng.gen_range(0..width);
             let y = rng.gen_range(0..height);
             if self.board_game[x][y].tile_type == TileType::Blank {
                 self.board_game[x][y].tile_type = TileType::Mountain;
             }
         }
-        for _ in 0..10 {
+        for _ in 0..NB_CASTLES {
             let x = rng.gen_range(0..width);
             let y = rng.gen_range(0..height);
             if self.board_game[x][y].tile_type == TileType::Blank {

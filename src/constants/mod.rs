@@ -11,4 +11,7 @@ pub const TICK_KINGDOM: usize = 1;
 pub const TICK_CASTLE: usize = 3;
 pub const TICK_BLANK: usize = 10;
 
+pub const NB_MOUTAINS: usize = 35;
+pub const NB_CASTLES: usize = 15;
+
 pub const DISPLAY_N_LAST_MESSAGES: usize = 3;
