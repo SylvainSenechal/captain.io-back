@@ -35,7 +35,7 @@ pub async fn handle_websocket(
         .write()
         .expect("couldnt lock players mutex")
         .insert(
-            player.name.clone(),
+            player.uuid.clone(),
             player_service::Player {
                 uuid: player.uuid.clone(),
                 name: player.name.clone(),
@@ -54,13 +54,19 @@ pub async fn handle_websocket(
         Sender<WsMessageToClient>,
         Receiver<WsMessageToClient>,
     ) = broadcast::channel(100);
-    let cloned_state = state.clone();
     let cloned_player = Player {
         uuid: player.uuid.clone(),
         name: player.name.clone(),
     };
+    let cloned_state = state.clone();
     let mut handle1 = tokio::spawn(async move {
-        receive(&mut receiver, player.name, player.uuid, cloned_state).await
+        receive(
+            &mut receiver,
+            cloned_player.name,
+            cloned_player.uuid,
+            cloned_state,
+        )
+        .await
     });
 
     global_lobbies_update(state.clone());
@@ -136,7 +142,7 @@ pub async fn handle_websocket(
         .players
         .write()
         .expect("failed to lock players to remove disconnected")
-        .remove(&cloned_player.name);
+        .remove(&player.uuid.clone());
     global_lobbies_update(state.clone());
 }
 
@@ -157,7 +163,7 @@ async fn receive(
                         ClientCommand::Move(new_move) => {
                             let mut players =
                                 state.players.write().expect("failed to lock players");
-                            let player = players.get_mut(&player_name).expect("msg");
+                            let player = players.get_mut(&player_uuid).expect("msg");
                             if player.queued_moves.len() < MAX_QUEUED_MOVES {
                                 player.queued_moves.push_back(new_move)
                             }
@@ -186,7 +192,7 @@ async fn receive(
                                     continue 'rec_v_loop;
                                 }
                                 let player = players
-                                    .get_mut(&player_name)
+                                    .get_mut(&player_uuid)
                                     .expect("failed to get playername");
                                 if let Some(in_lobby) = player.playing_in_lobby {
                                     if in_lobby == join_lobby_id {
@@ -198,11 +204,11 @@ async fn receive(
                                         .write()
                                         .unwrap()
                                         .players
-                                        .remove(&player_name.clone());
+                                        .remove(&player_uuid.clone());
                                 }
                                 lobby_to_join
                                     .players
-                                    .insert(player_name.clone(), player_uuid.clone());
+                                    .insert(player_uuid.clone(), player_name.clone());
                                 player.playing_in_lobby = Some(join_lobby_id);
                                 if lobby_to_join.players.len() == lobby_to_join.player_capacity {
                                     // Start the game soon..
@@ -247,7 +253,7 @@ async fn receive(
                                 .players
                                 .read()
                                 .expect("couldnt lock players")
-                                .get(&player_name)
+                                .get(&player_uuid)
                                 .expect("failed to get playername")
                                 .personal_tx
                                 .send(WsMessageToClient::Pong)
@@ -268,7 +274,7 @@ async fn receive(
                                 .players
                                 .read()
                                 .expect("couldnt lock players")
-                                .get(&player_name)
+                                .get(&player_uuid)
                                 .expect("couldnt find playername")
                                 .playing_in_lobby
                             {

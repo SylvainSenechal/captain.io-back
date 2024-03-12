@@ -11,6 +11,7 @@ use tokio::sync::broadcast;
 
 use crate::{constants, models::messages_to_clients::WsMessageToClient};
 use crate::{constants::YEAR_2128_TIMESTAMP, service_layer::player_service::Player};
+
 #[derive(Debug)]
 pub struct AppState {
     pub connection: Pool<SqliteConnectionManager>,
@@ -32,7 +33,7 @@ pub struct Lobby {
     pub next_starting_time: i64, // unix timestamp seconds
     pub player_capacity: usize,
     pub lobby_broadcast: broadcast::Sender<WsMessageToClient>,
-    pub players: HashMap<String, String>, // name->uuid
+    pub players: HashMap<String, String>, // uuid->name
     pub messages: Vec<ChatMessage>,
     pub board_game: Vec<Vec<Tile>>,
 }
@@ -48,18 +49,16 @@ pub enum LobbyStatus {
 pub struct Tile {
     pub status: TileStatus,
     pub tile_type: TileType,
-    pub player_name: Option<String>,
+    pub player_uuid: Option<String>,
     pub nb_troops: usize,
-    pub hidden: bool,
 }
 impl Default for Tile {
     fn default() -> Self {
         Tile {
             status: TileStatus::Empty,
             tile_type: TileType::Blank,
-            player_name: None,
+            player_uuid: None,
             nb_troops: 0,
-            hidden: true, // todo : has no business being stored here, should only be in returned board, not backend board
         }
     }
 }

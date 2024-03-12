@@ -9,26 +9,22 @@ mod utilities;
 
 use axum::{
     extract::{ws::WebSocketUpgrade, Path, State},
-    http::{self, HeaderValue, Method, Response, StatusCode},
+    http::{self, HeaderValue, Method, Response},
     response::IntoResponse,
     routing::{get, post, put},
-    Json, Router,
+    Router,
 };
-use custom_errors::service_errors::ServiceError;
 use tower_http::cors::CorsLayer;
-use utilities::responses::ApiResponse;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use crate::{
-    data_access_layer::player_dal,
-    service_layer::websocket_service::handle_websocket,
-    utilities::responses::{response_ok, response_ok_with_message},
-};
+use crate::{data_access_layer::player_dal, service_layer::websocket_service::handle_websocket};
 
 // todo : review .clone()
-// todo : surrender, games history
+// todo : surrender
+// todo : games history
+// todo : manual queue pointer update
 #[tokio::main]
 async fn main() {
     println!("Hello, world!");
@@ -108,11 +104,12 @@ async fn websocket_connection(
     }
 
     let player = player_in_db.unwrap();
-    if let Some(_) = state
+    if state
         .players
         .read()
         .expect("failed to read players")
-        .get(&player.name)
+        .get(&player.uuid)
+        .is_some()
     {
         println!(
             "websocket_connection, player uuid={} already connected",

@@ -4,7 +4,7 @@ use crate::{
         app_state::{Lobby, LobbyStatus, Tile, TileStatus, TileType},
     },
     constants::{TICK_BLANK, TICK_CASTLE, TICK_GAME_INTERVAL_MS, TICK_KINGDOM},
-    models::messages_to_clients::{GameUpdate, PlayerScore, WsMessageToClient},
+    models::messages_to_clients::{GameUpdate, PlayerScore, TileUpdate, WsMessageToClient},
 };
 use chrono::Utc;
 use rand::Rng;
@@ -57,10 +57,10 @@ fn lunch_game(state: Arc<configs::app_state::AppState>, lobby: &mut Lobby) -> bo
         lobby.status = LobbyStatus::InGame;
         let mut unavailable_colors = vec![];
         let mut players = state.players.write().expect("failed to lock player");
-        for (player_name, _uuid) in lobby.players.iter() {
+        for (player_uuid, _player_name) in lobby.players.iter() {
             let new_player_color = Color::pick_available_color(&unavailable_colors);
             let player = players
-                .get_mut(&player_name.clone())
+                .get_mut(&player_uuid.clone())
                 .expect("failed to get player");
             player.queued_moves = VecDeque::new();
             player.color = new_player_color.clone();
@@ -70,8 +70,7 @@ fn lunch_game(state: Arc<configs::app_state::AppState>, lobby: &mut Lobby) -> bo
                 status: TileStatus::Occupied,
                 tile_type: TileType::Kingdom,
                 nb_troops: 1,
-                player_name: Some(player.name.clone()),
-                hidden: true,
+                player_uuid: Some(player_uuid.clone()),
             };
         }
         let _ = lobby
@@ -106,7 +105,7 @@ fn tick_game(
     let mut remaining_players = HashSet::new();
     let width_game = lobby.board_game.len();
     let height_game = lobby.board_game[0].len();
-    for (player_name, _uuid) in lobby.players.iter() {
+    for (player_uuid, player_name) in lobby.players.iter() {
         scoreboard.insert(
             player_name.clone(),
             PlayerScore {
@@ -115,14 +114,14 @@ fn tick_game(
                 color: Color::Grey,
             },
         );
-        if let Some(attacker) = players.get_mut(player_name) {
+        if let Some(attacker) = players.get_mut(player_uuid) {
+            // todo : also check the attacker current lobby id : or else it will play the user new lobby moves
             // attacker = None if the player left the game
             scoreboard
                 .get_mut(&attacker.name.clone())
                 .expect("no attacker name in score board")
                 .color = attacker.color.clone();
 
-            // todo : if move is useless, try to perform the next one ?
             if let Some(next_move) = attacker.queued_moves.pop_front() {
                 let mut attacked_x = attacker.xy.0;
                 let mut attacked_y = attacker.xy.1;
@@ -141,7 +140,7 @@ fn tick_game(
                     }
                 }
                 match resolve_assault(
-                    attacker.name.clone(),
+                    attacker.uuid.clone(),
                     &lobby.board_game,
                     attacker.xy,
                     (attacked_x, attacked_y),
@@ -159,9 +158,8 @@ fn tick_game(
                         lobby.board_game[attacked_x][attacked_y] = Tile {
                             status: TileStatus::Occupied,
                             tile_type: lobby.board_game[attacked_x][attacked_y].tile_type.clone(),
-                            player_name: Some(attacker.name.clone()),
+                            player_uuid: Some(attacker.uuid.clone()),
                             nb_troops: lobby.board_game[attacker.xy.0][attacker.xy.1].nb_troops - 1,
-                            hidden: true,
                         };
                         lobby.board_game[attacker.xy.0][attacker.xy.1].nb_troops = 1;
                     }
@@ -169,25 +167,24 @@ fn tick_game(
                         lobby.board_game[attacker.xy.0][attacker.xy.1].nb_troops = 1;
                         lobby.board_game[attacked_x][attacked_y].nb_troops = 0;
                     }
-                    IssueAssault::Victory(loser_name, nb_remaining) => {
+                    IssueAssault::Victory(loser_uuid, nb_remaining) => {
                         lobby.board_game[attacker.xy.0][attacker.xy.1].nb_troops = 1;
                         lobby.board_game[attacked_x][attacked_y] = Tile {
                             status: TileStatus::Occupied,
                             tile_type: lobby.board_game[attacked_x][attacked_y].tile_type.clone(),
-                            player_name: Some(attacker.name.clone()),
+                            player_uuid: Some(attacker.uuid.clone()),
                             nb_troops: nb_remaining,
-                            hidden: true,
                         };
                         if lobby.board_game[attacked_x][attacked_y].tile_type == TileType::Kingdom {
                             lobby.board_game[attacked_x][attacked_y].tile_type = TileType::Castle;
                             for position in lobby.board_game.iter_mut().flatten() {
-                                if let Some(occupier_name) = position.player_name.clone() {
-                                    if occupier_name == loser_name {
-                                        position.player_name = Some(attacker.name.clone());
+                                if let Some(occupier_uuid) = position.player_uuid.clone() {
+                                    if occupier_uuid == loser_uuid {
+                                        position.player_uuid = Some(attacker.uuid.clone());
                                     }
                                     remaining_players.insert(
                                         position
-                                            .player_name
+                                            .player_uuid
                                             .clone()
                                             .expect("no player in position"),
                                     );
@@ -204,9 +201,8 @@ fn tick_game(
                         lobby.board_game[attacked_x][attacked_y] = Tile {
                             status: TileStatus::Occupied,
                             tile_type: lobby.board_game[attacked_x][attacked_y].tile_type.clone(),
-                            player_name: Some(attacker.name.clone()),
+                            player_uuid: Some(attacker.uuid.clone()),
                             nb_troops: nb_remaining,
-                            hidden: true,
                         };
                     }
                 }
@@ -218,15 +214,15 @@ fn tick_game(
     }
 
     for position in lobby.board_game.iter().flatten() {
-        if let Some(occupier_name) = position.player_name.clone() {
-            scoreboard.entry(occupier_name).and_modify(|score| {
+        if let Some(occupier_uuid) = position.player_uuid.clone() {
+            scoreboard.entry(occupier_uuid).and_modify(|score| {
                 score.total_positions += 1;
                 score.total_troops += position.nb_troops;
             });
         }
     }
     for (_, player) in players.iter() {
-        let mut personal_board_game: Vec<Vec<Tile>> = vec![];
+        let mut personal_board_game: Vec<Vec<TileUpdate>> = vec![];
         let width = lobby.board_game.len();
         let height = lobby.board_game[0].len();
         for i in 0..width {
@@ -238,7 +234,7 @@ fn tick_game(
                     TileType::Castle => TileType::Mountain,
                     TileType::Mountain => TileType::Mountain,
                 };
-                column.push(Tile {
+                column.push(TileUpdate {
                     status: TileStatus::Empty,
                     tile_type: hidden_type,
                     player_name: None,
@@ -250,32 +246,31 @@ fn tick_game(
         }
         for i in 0..width {
             for j in 0..height {
-                if let Some(name) = lobby.board_game[i][j].player_name.clone() {
-                    if name == player.name {
+                if let Some(uuid) = lobby.board_game[i][j].player_uuid.clone() {
+                    if uuid == player.uuid {
                         let min_w = i.saturating_sub(1);
                         let min_h = j.saturating_sub(1);
                         let max_w = (i + 1).min(width - 1);
                         let max_h = (j + 1).min(height - 1);
 
-                        personal_board_game[min_w][min_h] = lobby.board_game[min_w][min_h].clone();
-                        personal_board_game[min_w][j] = lobby.board_game[min_w][j].clone();
-                        personal_board_game[min_w][max_h] = lobby.board_game[min_w][max_h].clone();
-                        personal_board_game[i][min_h] = lobby.board_game[i][min_h].clone();
-                        personal_board_game[i][j] = lobby.board_game[i][j].clone();
-                        personal_board_game[i][max_h] = lobby.board_game[i][max_h].clone();
-                        personal_board_game[max_w][min_h] = lobby.board_game[max_w][min_h].clone();
-                        personal_board_game[max_w][j] = lobby.board_game[max_w][j].clone();
-                        personal_board_game[max_w][max_h] = lobby.board_game[max_w][max_h].clone();
-
-                        personal_board_game[min_w][min_h].hidden = false;
-                        personal_board_game[min_w][j].hidden = false;
-                        personal_board_game[min_w][max_h].hidden = false;
-                        personal_board_game[i][min_h].hidden = false;
-                        personal_board_game[i][j].hidden = false;
-                        personal_board_game[i][max_h].hidden = false;
-                        personal_board_game[max_w][min_h].hidden = false;
-                        personal_board_game[max_w][j].hidden = false;
-                        personal_board_game[max_w][max_h].hidden = false;
+                        personal_board_game[min_w][min_h]
+                            .from_game_tile(&lobby.board_game[min_w][min_h], &lobby.players);
+                        personal_board_game[min_w][j]
+                            .from_game_tile(&lobby.board_game[min_w][j], &lobby.players);
+                        personal_board_game[min_w][max_h]
+                            .from_game_tile(&lobby.board_game[min_w][max_h], &lobby.players);
+                        personal_board_game[i][min_h]
+                            .from_game_tile(&lobby.board_game[i][min_h], &lobby.players);
+                        personal_board_game[i][j]
+                            .from_game_tile(&lobby.board_game[i][j], &lobby.players);
+                        personal_board_game[i][max_h]
+                            .from_game_tile(&lobby.board_game[i][max_h], &lobby.players);
+                        personal_board_game[max_w][min_h]
+                            .from_game_tile(&lobby.board_game[max_w][min_h], &lobby.players);
+                        personal_board_game[max_w][j]
+                            .from_game_tile(&lobby.board_game[max_w][j], &lobby.players);
+                        personal_board_game[max_w][max_h]
+                            .from_game_tile(&lobby.board_game[max_w][max_h], &lobby.players);
                     }
                 }
             }
@@ -285,7 +280,6 @@ fn tick_game(
             .personal_tx
             .send(WsMessageToClient::GameUpdate(GameUpdate {
                 board_game: personal_board_game,
-                // board_game: lobby.board_game.clone(),
                 score_board: scoreboard.clone(),
                 moves: PlayerMoves {
                     queued_moves: player.queued_moves.clone(),
@@ -316,11 +310,12 @@ pub fn end_lobby_game(lobby: &mut Lobby, state: Arc<configs::app_state::AppState
         .write()
         .expect("failed to lock players end game");
 
-    for (_, player_uuid) in lobby.players.iter() {
+    for (player_uuid, _) in lobby.players.iter() {
         for (_, player) in all_players.iter_mut() {
             if player_uuid.clone() == player.uuid {
                 if let Some(already_in_lobby_id) = player.playing_in_lobby {
                     if already_in_lobby_id == lobby.lobby_id {
+                        // only reset if not already started another game (after leaving the current one)
                         player.playing_in_lobby = None;
                     }
                 }
@@ -352,13 +347,13 @@ enum IssueAssault {
     SelfTroopsMove,
     ConquerEmpty,
     Tie,
-    Victory(String, usize), // loser_name, how many invaders survive on defensive case
+    Victory(String, usize), // loser_uuid, how many invaders survive on defensive case
     Defeat(usize),          // how many loss on defensive case (1 remaining on attacking)
     VictoryCastle(usize),
 }
 
 fn resolve_assault(
-    real_attacker_name: String,
+    real_attacker_uuid: String,
     board: &[Vec<Tile>],
     attacker_xy: (usize, usize),
     defender_xy: (usize, usize),
@@ -376,17 +371,17 @@ fn resolve_assault(
     if defending_board.tile_type == TileType::Mountain {
         return IssueAssault::BlockedByMountain;
     }
-    // If a position move in the queue was stolen,  the player_name of the attacking
+    // If a position move in the queue was stolen, the player_uuid of the attacking
     // tile will be different from the real attacker, and the attack forbidden
-    match attacking_board.player_name.clone() {
+    match attacking_board.player_uuid.clone() {
         None => return IssueAssault::TileNotOwned,
-        Some(attacker_name) => {
-            if attacker_name != real_attacker_name {
+        Some(attacker_uuid) => {
+            if attacker_uuid != real_attacker_uuid {
                 return IssueAssault::TileNotOwned;
             }
         }
     }
-    if attacking_board.player_name == defending_board.player_name {
+    if attacking_board.player_uuid == defending_board.player_uuid {
         return IssueAssault::SelfTroopsMove;
     }
 
@@ -395,7 +390,7 @@ fn resolve_assault(
             Ordering::Equal => IssueAssault::Tie,
             Ordering::Greater => IssueAssault::Victory(
                 defending_board
-                    .player_name
+                    .player_uuid
                     .clone()
                     .expect("no defender name on attacked tile"),
                 nb_attacking_troops - nb_defending_troops,

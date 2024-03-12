@@ -111,22 +111,22 @@ pub async fn is_valid_playername(
 }
 
 fn internal_is_valid_playername(
-    playername: String,
+    player_name: String,
     state: &Arc<AppState>,
 ) -> Result<IsValidPlayernameResponse, ServiceError> {
     // todo : add banword list
-    if playername.chars().count() < MINIMUM_PLAYERNAME_LENGTH {
+    if player_name.chars().count() < MINIMUM_PLAYERNAME_LENGTH {
         return Ok(IsValidPlayernameResponse {
             is_valid: false,
             reason: Some(format!(
                 "player name is too short ({} characters), it should be at least {}",
-                playername.chars().count(),
+                player_name.chars().count(),
                 MINIMUM_PLAYERNAME_LENGTH
             )),
         });
     }
 
-    match data_access_layer::player_dal::get_player_by_name(state, playername.clone()) {
+    match data_access_layer::player_dal::get_player_by_name(state, player_name.clone()) {
         Ok(_) => Ok(IsValidPlayernameResponse {
             is_valid: false,
             reason: Some("player name already exists".to_string()),

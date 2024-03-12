@@ -1,10 +1,13 @@
-use std::collections::HashMap;
+use std::{any::Any, collections::HashMap, sync::Arc};
 
 use axum::extract::ws::Message;
 use serde::Serialize;
 
 use crate::{
-    configs::app_state::{ChatMessage, LobbyStatus, Tile},
+    configs::{
+        self,
+        app_state::{ChatMessage, LobbyStatus, Tile, TileStatus, TileType},
+    },
     service_layer::player_service::{Color, PlayerMoves},
 };
 
@@ -90,9 +93,35 @@ pub struct LobbyGeneralUpdate {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct GameUpdate {
-    pub board_game: Vec<Vec<Tile>>,
+    pub board_game: Vec<Vec<TileUpdate>>,
     pub score_board: HashMap<String, PlayerScore>,
     pub moves: PlayerMoves,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct TileUpdate {
+    pub status: TileStatus,
+    pub tile_type: TileType,
+    pub player_name: Option<String>,
+    pub nb_troops: usize,
+    pub hidden: bool,
+}
+
+impl TileUpdate {
+    pub fn from_game_tile(&mut self, tile: &Tile, lobby_players: &HashMap<String, String>) {
+        self.status = tile.status.clone();
+        self.tile_type = tile.tile_type.clone();
+        self.player_name = None;
+        self.nb_troops = tile.nb_troops;
+        self.hidden = false;
+        if let Some(player_uuid) = tile.player_uuid.clone() {
+            self.player_name = Some(
+                lobby_players
+                    .get(&player_uuid)
+                    .expect("couldn't find player")
+                    .into(),
+            );
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
