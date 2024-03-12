@@ -59,7 +59,7 @@ pub async fn handle_websocket(
         name: player.name.clone(),
     };
     let cloned_state = state.clone();
-    let mut handle1 = tokio::spawn(async move {
+    let mut ws_receiver = tokio::spawn(async move {
         receive(
             &mut receiver,
             cloned_player.name,
@@ -73,7 +73,7 @@ pub async fn handle_websocket(
     global_chat_sync(perso_tx, state.clone());
 
     let cloned_state = state.clone();
-    let mut handle2 = tokio::spawn(async move {
+    let mut message_controler = tokio::spawn(async move {
         loop {
             tokio::select! {
                 elem = global_subscription.recv() => {
@@ -128,16 +128,44 @@ pub async fn handle_websocket(
 
     // Waiting while the player is connected
     tokio::select! {
-        res = (&mut handle1) => {
-            println!("aborted 1 {:?}", res);
-            handle2.abort()
+        res = (&mut ws_receiver) => {
+            println!("aborted ws_receiver {:?}", res);
+            message_controler.abort()
         },
-        res = (&mut handle2) => {
-            println!("aborted 2 {:?}", res);
-            handle1.abort()
+        res = (&mut message_controler) => {
+            println!("aborted message_controler {:?}", res);
+            ws_receiver.abort()
         },
     };
 
+    // Handle player disconnecting :
+    // 1. Remove from the lobby (except when already in game)
+    if let Some(lobby_id) = state
+        .players
+        .read()
+        .expect("failed to read players")
+        .get(&player.uuid)
+        .expect("player uuid not found")
+        .playing_in_lobby
+    {
+        let lobby_status = state.lobbies[lobby_id]
+            .read()
+            .expect("failed to read lobby")
+            .status;
+        match lobby_status {
+            LobbyStatus::InGame => (), // don't remove from lobby, the player will become inactive instead
+            LobbyStatus::StartingSoon => (), // don't remove from lobby, the player will become inactive instead
+            LobbyStatus::AwaitingPlayers => {
+                state.lobbies[lobby_id]
+                    .write()
+                    .expect("failed to write lobby")
+                    .players
+                    .remove(&player.uuid);
+            }
+        }
+    }
+
+    // 2. Remove from connected players list
     state
         .players
         .write()

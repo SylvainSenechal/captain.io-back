@@ -59,14 +59,16 @@ fn lunch_game(state: Arc<configs::app_state::AppState>, lobby: &mut Lobby) -> bo
         let mut players = state.players.write().expect("failed to lock player");
         for (player_uuid, _player_name) in lobby.players.iter() {
             let new_player_color = Color::pick_available_color(&unavailable_colors);
-            let player = players
-                .get_mut(&player_uuid.clone())
-                .expect("failed to get player");
-            player.queued_moves = VecDeque::new();
-            player.color = new_player_color.clone();
-            unavailable_colors.push(new_player_color);
-            player.xy = pick_available_starting_coordinates(&lobby.board_game);
-            lobby.board_game[player.xy.0][player.xy.1] = Tile {
+            let (x, y) = pick_available_starting_coordinates(&lobby.board_game);
+            if let Some(player) = players.get_mut(&player_uuid.clone()) {
+                // the player could leave the lobby while the game is lunching..
+                player.queued_moves = VecDeque::new();
+                player.color = new_player_color.clone();
+                unavailable_colors.push(new_player_color);
+                player.xy = (x, y);
+            }
+            lobby.board_game[x][y] = Tile {
+                // still add him in the map, will be displayed as inactive
                 status: TileStatus::Occupied,
                 tile_type: TileType::Kingdom,
                 nb_troops: 1,
@@ -296,7 +298,9 @@ fn tick_game(
             }));
     }
 
+    // todo : check remaining players > 1 but both inactive..
     if remaining_players.len() == 1 {
+        // todo : be careful sending this if the player already left to another lobby..
         let _ = lobby
             .lobby_broadcast
             .send(WsMessageToClient::WinnerAnnouncement(
