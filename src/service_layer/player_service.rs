@@ -1,5 +1,5 @@
 use crate::configs::app_state::AppState;
-use crate::constants::{MINIMUM_PLAYERNAME_LENGTH, PLAYER_NAMES};
+use crate::constants::{MAXIMUM_PLAYERNAME_LENGTH, MINIMUM_PLAYERNAME_LENGTH, PLAYER_NAMES};
 use crate::custom_errors::service_errors::ServiceError;
 use crate::custom_errors::sqlite_errors::SqliteError;
 use crate::data_access_layer::{self, player_dal};
@@ -17,6 +17,7 @@ use axum::{
 use rand::seq::SliceRandom;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -54,15 +55,22 @@ pub enum Color {
     Red,
     Blue,
     Pink,
+    Green,
+    Yellow,
 }
 
 impl Color {
-    pub fn pick_available_color(unavailable_colors: &[Color]) -> Color {
-        const COLORS: [Color; 3] = [Color::Red, Color::Blue, Color::Pink];
-        let new_color = COLORS
+    pub fn pick_available_color(unavailable_colors: &[Color]) -> Option<&Color> {
+        const COLORS: [Color; 5] = [
+            Color::Red,
+            Color::Blue,
+            Color::Pink,
+            Color::Green,
+            Color::Yellow,
+        ];
+        COLORS
             .iter()
-            .find(|&color| !unavailable_colors.contains(color));
-        new_color.expect("could not find a new color").clone()
+            .find(|&color| !unavailable_colors.contains(color))
     }
 }
 
@@ -114,17 +122,31 @@ fn internal_is_valid_playername(
     player_name: String,
     state: &Arc<AppState>,
 ) -> Result<IsValidPlayernameResponse, ServiceError> {
-    // todo : max len too ?
     // todo : add banword list
-    if player_name.chars().count() < MINIMUM_PLAYERNAME_LENGTH {
-        return Ok(IsValidPlayernameResponse {
-            is_valid: false,
-            reason: Some(format!(
-                "player name is too short ({} characters), it should be at least {}",
-                player_name.chars().count(),
-                MINIMUM_PLAYERNAME_LENGTH
-            )),
-        });
+    let name_length = player_name.chars().count();
+    match name_length.cmp(&MINIMUM_PLAYERNAME_LENGTH) {
+        Ordering::Equal => (),
+        Ordering::Less => {
+            return Ok(IsValidPlayernameResponse {
+                is_valid: false,
+                reason: Some(format!(
+                    "player name is too short ({} characters), it should be at least {}",
+                    name_length, MINIMUM_PLAYERNAME_LENGTH
+                )),
+            })
+        }
+        Ordering::Greater => match name_length.cmp(&MAXIMUM_PLAYERNAME_LENGTH) {
+            Ordering::Greater => {
+                return Ok(IsValidPlayernameResponse {
+                    is_valid: false,
+                    reason: Some(format!(
+                        "player name is too long ({} characters), it should be at most {}",
+                        name_length, MAXIMUM_PLAYERNAME_LENGTH
+                    )),
+                })
+            }
+            _ => (),
+        },
     }
 
     match data_access_layer::player_dal::get_player_by_name(state, player_name.clone()) {

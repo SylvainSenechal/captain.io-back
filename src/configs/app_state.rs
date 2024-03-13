@@ -10,7 +10,9 @@ use serde::Serialize;
 use tokio::sync::broadcast;
 
 use crate::{
-    constants::{self, NB_CASTLES},
+    constants::{
+        self, MAX_GAME_HEIGHT, MAX_GAME_WIDTH, MIN_GAME_HEIGHT, MIN_GAME_WIDTH, NB_CASTLES,
+    },
     models::messages_to_clients::WsMessageToClient,
 };
 use crate::{
@@ -99,9 +101,8 @@ impl Lobby {
     }
     pub fn generate_new_board(&mut self) {
         let mut rng = rand::thread_rng();
-        let width = rng.gen_range(20..25);
-        let height = rng.gen_range(20..25);
-        // todo : const
+        let width = rng.gen_range(MIN_GAME_WIDTH..MAX_GAME_WIDTH);
+        let height = rng.gen_range(MIN_GAME_HEIGHT..MAX_GAME_HEIGHT);
         self.board_game = vec![];
         for _ in 0..width {
             let mut column = vec![];

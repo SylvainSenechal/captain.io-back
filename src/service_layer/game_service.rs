@@ -20,8 +20,6 @@ use super::{
     websocket_service::global_lobbies_update,
 };
 
-// todo : becareful if user join lobby and then quit before start : remove their game position
-// + test reload during the game
 pub async fn game_loop(state: Arc<configs::app_state::AppState>) {
     let mut tick = 0;
     let mut interval = interval(Duration::from_millis(TICK_GAME_INTERVAL_MS));
@@ -58,13 +56,14 @@ fn lunch_game(state: Arc<configs::app_state::AppState>, lobby: &mut Lobby) -> bo
         let mut unavailable_colors = vec![];
         let mut players = state.players.write().expect("failed to lock player");
         for (player_uuid, _player_name) in lobby.players.iter() {
-            let new_player_color = Color::pick_available_color(&unavailable_colors);
+            let new_player_color = Color::pick_available_color(&unavailable_colors)
+                .expect("no player color available");
             let (x, y) = pick_available_starting_coordinates(&lobby.board_game);
             if let Some(player) = players.get_mut(&player_uuid.clone()) {
                 // the player could leave the lobby while the game is lunching..
                 player.queued_moves = VecDeque::new();
                 player.color = new_player_color.clone();
-                unavailable_colors.push(new_player_color);
+                unavailable_colors.push(new_player_color.clone());
                 player.xy = (x, y);
             }
             lobby.board_game[x][y] = Tile {
@@ -104,7 +103,6 @@ fn tick_game(
     }
     let mut players = state.players.write().expect("failed to lock players");
     let mut scoreboard: HashMap<String, PlayerScore> = HashMap::new();
-    let mut remaining_players = HashSet::new();
     let width_game = lobby.board_game.len();
     let height_game = lobby.board_game[0].len();
     for (player_uuid, player_name) in lobby.players.iter() {
@@ -147,16 +145,16 @@ fn tick_game(
                     attacker.xy,
                     (attacked_x, attacked_y),
                 ) {
-                    IssueAssault::AttackingSameTile => (),
-                    IssueAssault::BlockedByMountain => (),
-                    IssueAssault::NotEnoughTroops => (),
-                    IssueAssault::TileNotOwned => (),
-                    IssueAssault::SelfTroopsMove => {
+                    OutcomeAssault::AttackingSameTile => (),
+                    OutcomeAssault::BlockedByMountain => (),
+                    OutcomeAssault::NotEnoughTroops => (),
+                    OutcomeAssault::TileNotOwned => (),
+                    OutcomeAssault::SelfTroopsMove => {
                         lobby.board_game[attacked_x][attacked_y].nb_troops +=
                             lobby.board_game[attacker.xy.0][attacker.xy.1].nb_troops - 1;
                         lobby.board_game[attacker.xy.0][attacker.xy.1].nb_troops = 1;
                     }
-                    IssueAssault::ConquerEmpty => {
+                    OutcomeAssault::ConquerEmpty => {
                         lobby.board_game[attacked_x][attacked_y] = Tile {
                             status: TileStatus::Occupied,
                             tile_type: lobby.board_game[attacked_x][attacked_y].tile_type.clone(),
@@ -165,11 +163,11 @@ fn tick_game(
                         };
                         lobby.board_game[attacker.xy.0][attacker.xy.1].nb_troops = 1;
                     }
-                    IssueAssault::Tie => {
+                    OutcomeAssault::Tie => {
                         lobby.board_game[attacker.xy.0][attacker.xy.1].nb_troops = 1;
                         lobby.board_game[attacked_x][attacked_y].nb_troops = 0;
                     }
-                    IssueAssault::Victory(loser_uuid, nb_remaining) => {
+                    OutcomeAssault::Victory(loser_uuid, nb_remaining) => {
                         lobby.board_game[attacker.xy.0][attacker.xy.1].nb_troops = 1;
                         lobby.board_game[attacked_x][attacked_y] = Tile {
                             status: TileStatus::Occupied,
@@ -184,21 +182,15 @@ fn tick_game(
                                     if occupier_uuid == loser_uuid {
                                         position.player_uuid = Some(attacker.uuid.clone());
                                     }
-                                    remaining_players.insert(
-                                        position
-                                            .player_uuid
-                                            .clone()
-                                            .expect("no player in position"),
-                                    );
                                 }
                             }
                         }
                     }
-                    IssueAssault::Defeat(defensive_losses) => {
+                    OutcomeAssault::Defeat(defensive_losses) => {
                         lobby.board_game[attacker.xy.0][attacker.xy.1].nb_troops = 1;
                         lobby.board_game[attacked_x][attacked_y].nb_troops = defensive_losses;
                     }
-                    IssueAssault::VictoryCastle(nb_remaining) => {
+                    OutcomeAssault::VictoryCastle(nb_remaining) => {
                         lobby.board_game[attacker.xy.0][attacker.xy.1].nb_troops = 1;
                         lobby.board_game[attacked_x][attacked_y] = Tile {
                             status: TileStatus::Occupied,
@@ -215,20 +207,18 @@ fn tick_game(
         }
     }
 
+    let mut remaining_players = HashSet::new();
     for position in lobby.board_game.iter().flatten() {
         if let Some(occupier_uuid) = position.player_uuid.clone() {
-            scoreboard
-                .entry(
-                    lobby
-                        .players
-                        .get(&occupier_uuid)
-                        .expect("couldn't find player")
-                        .into(),
-                )
-                .and_modify(|score| {
-                    score.total_positions += 1;
-                    score.total_troops += position.nb_troops;
-                });
+            let player_name = lobby
+                .players
+                .get(&occupier_uuid)
+                .expect("couldn't find player");
+            remaining_players.insert(player_name);
+            scoreboard.entry(player_name.clone()).and_modify(|score| {
+                score.total_positions += 1;
+                score.total_troops += position.nb_troops;
+            });
         }
     }
     for (_, player) in players.iter() {
@@ -299,8 +289,7 @@ fn tick_game(
     }
 
     // todo : check remaining players > 1 but both inactive..
-    if remaining_players.len() == 1 {
-        // todo : be careful sending this if the player already left to another lobby..
+    if remaining_players.len() == 1 && tick > 30 {
         let _ = lobby
             .lobby_broadcast
             .send(WsMessageToClient::WinnerAnnouncement(
@@ -351,7 +340,7 @@ pub fn pick_available_starting_coordinates(board: &Vec<Vec<Tile>>) -> (usize, us
     }
 }
 
-enum IssueAssault {
+enum OutcomeAssault {
     AttackingSameTile, // happens typically on side of the board, when going into a wall
     BlockedByMountain,
     NotEnoughTroops,
@@ -369,55 +358,55 @@ fn resolve_assault(
     board: &[Vec<Tile>],
     attacker_xy: (usize, usize),
     defender_xy: (usize, usize),
-) -> IssueAssault {
+) -> OutcomeAssault {
     if attacker_xy.0 == defender_xy.0 && attacker_xy.1 == defender_xy.1 {
-        return IssueAssault::AttackingSameTile;
+        return OutcomeAssault::AttackingSameTile;
     }
     let attacking_board = &board[attacker_xy.0][attacker_xy.1];
     let defending_board = &board[defender_xy.0][defender_xy.1];
     let nb_attacking_troops = attacking_board.nb_troops.saturating_sub(1); // 1 troop must remain on the current case
     let nb_defending_troops = defending_board.nb_troops;
     if nb_attacking_troops == 0 {
-        return IssueAssault::NotEnoughTroops;
+        return OutcomeAssault::NotEnoughTroops;
     }
     if defending_board.tile_type == TileType::Mountain {
-        return IssueAssault::BlockedByMountain;
+        return OutcomeAssault::BlockedByMountain;
     }
     // If a position move in the queue was stolen, the player_uuid of the attacking
     // tile will be different from the real attacker, and the attack forbidden
     match attacking_board.player_uuid.clone() {
-        None => return IssueAssault::TileNotOwned,
+        None => return OutcomeAssault::TileNotOwned,
         Some(attacker_uuid) => {
             if attacker_uuid != real_attacker_uuid {
-                return IssueAssault::TileNotOwned;
+                return OutcomeAssault::TileNotOwned;
             }
         }
     }
     if attacking_board.player_uuid == defending_board.player_uuid {
-        return IssueAssault::SelfTroopsMove;
+        return OutcomeAssault::SelfTroopsMove;
     }
 
     match defending_board.status {
         TileStatus::Occupied => match nb_attacking_troops.cmp(&nb_defending_troops) {
-            Ordering::Equal => IssueAssault::Tie,
-            Ordering::Greater => IssueAssault::Victory(
+            Ordering::Equal => OutcomeAssault::Tie,
+            Ordering::Greater => OutcomeAssault::Victory(
                 defending_board
                     .player_uuid
                     .clone()
                     .expect("no defender name on attacked tile"),
                 nb_attacking_troops - nb_defending_troops,
             ),
-            Ordering::Less => IssueAssault::Defeat(nb_defending_troops - nb_attacking_troops),
+            Ordering::Less => OutcomeAssault::Defeat(nb_defending_troops - nb_attacking_troops),
         },
         TileStatus::Empty if defending_board.tile_type == TileType::Castle => {
             match nb_attacking_troops.cmp(&nb_defending_troops) {
-                Ordering::Equal => IssueAssault::Tie,
+                Ordering::Equal => OutcomeAssault::Tie,
                 Ordering::Greater => {
-                    IssueAssault::VictoryCastle(nb_attacking_troops - nb_defending_troops)
+                    OutcomeAssault::VictoryCastle(nb_attacking_troops - nb_defending_troops)
                 }
-                Ordering::Less => IssueAssault::Defeat(nb_defending_troops - nb_attacking_troops),
+                Ordering::Less => OutcomeAssault::Defeat(nb_defending_troops - nb_attacking_troops),
             }
         }
-        TileStatus::Empty => IssueAssault::ConquerEmpty,
+        TileStatus::Empty => OutcomeAssault::ConquerEmpty,
     }
 }

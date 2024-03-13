@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use crate::{data_access_layer::player_dal, service_layer::websocket_service::handle_websocket};
 
-// todo : review .clone()
+// todo : reference instead of .clone()
 // todo : surrender
 // todo : games history
 // todo : manual queue pointer update
