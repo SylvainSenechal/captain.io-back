@@ -21,11 +21,9 @@ use super::{
 };
 
 pub async fn game_loop(state: Arc<configs::app_state::AppState>) {
-    let mut tick = 0;
     let mut interval = interval(Duration::from_millis(TICK_GAME_INTERVAL_MS));
     loop {
         interval.tick().await; // The first tick completes immediately
-        tick += 1;
         for mutex_lobby in state.lobbies.iter() {
             let mut lobby = mutex_lobby.write().expect("failed to lock lobby");
             match lobby.status {
@@ -37,7 +35,7 @@ pub async fn game_loop(state: Arc<configs::app_state::AppState>) {
                     }
                 }
                 LobbyStatus::InGame => {
-                    if let Ok(is_game_finished) = tick_game(&mut lobby, tick, state.clone()) {
+                    if let Ok(is_game_finished) = tick_game(&mut lobby, state.clone()) {
                         if is_game_finished {
                             end_lobby_game(&mut lobby, state.clone());
                             drop(lobby);
@@ -84,17 +82,14 @@ fn lunch_game(state: Arc<configs::app_state::AppState>, lobby: &mut Lobby) -> bo
     }
 }
 
-fn tick_game(
-    lobby: &mut Lobby,
-    tick: usize,
-    state: Arc<configs::app_state::AppState>,
-) -> Result<bool, String> {
+fn tick_game(lobby: &mut Lobby, state: Arc<configs::app_state::AppState>) -> Result<bool, String> {
+    lobby.tick += 1;
     for position in lobby.board_game.iter_mut().flatten() {
         match position.status {
             TileStatus::Occupied => match position.tile_type {
-                TileType::Kingdom if tick % TICK_KINGDOM == 0 => position.nb_troops += 1,
-                TileType::Castle if tick % TICK_CASTLE == 0 => position.nb_troops += 1,
-                TileType::Blank if tick % TICK_BLANK == 0 => position.nb_troops += 1,
+                TileType::Kingdom if lobby.tick % TICK_KINGDOM == 0 => position.nb_troops += 1,
+                TileType::Castle if lobby.tick % TICK_CASTLE == 0 => position.nb_troops += 1,
+                TileType::Blank if lobby.tick % TICK_BLANK == 0 => position.nb_troops += 1,
                 TileType::Mountain => (),
                 _ => (),
             },
@@ -105,7 +100,8 @@ fn tick_game(
     let mut scoreboard: HashMap<String, PlayerScore> = HashMap::new();
     let width_game = lobby.board_game.len();
     let height_game = lobby.board_game[0].len();
-    for (player_uuid, player_name) in lobby.players.iter() {
+
+    'loop_attackers: for (player_uuid, player_name) in lobby.players.iter() {
         scoreboard.insert(
             player_name.clone(),
             PlayerScore {
@@ -115,8 +111,15 @@ fn tick_game(
             },
         );
         if let Some(attacker) = players.get_mut(player_uuid) {
-            // todo : also check the attacker current lobby id : or else it will play the user new lobby moves
-            // attacker = None if the player left the game
+            match attacker.playing_in_lobby {
+                None => continue 'loop_attackers, // if the player left the webpage
+                Some(lobby_id) => {
+                    if lobby_id != lobby.lobby_id {
+                        // The player refreshed and went inside another game
+                        continue 'loop_attackers;
+                    }
+                }
+            };
             scoreboard
                 .get_mut(&attacker.name.clone())
                 .expect("no attacker name in score board")
@@ -221,6 +224,13 @@ fn tick_game(
             });
         }
     }
+
+    let mut nb_active = 0; // todo : count differently with filter
+    for (_, score) in scoreboard.iter() {
+        if score.color != Color::Grey {
+            nb_active += 1;
+        }
+    }
     for (_, player) in players.iter() {
         let mut personal_board_game: Vec<Vec<TileUpdate>> = vec![];
         let width = lobby.board_game.len();
@@ -285,24 +295,34 @@ fn tick_game(
                     queued_moves: player.queued_moves.clone(),
                     xy: player.xy,
                 },
+                tick: lobby.tick,
             }));
     }
 
-    // todo : check remaining players > 1 but both inactive..
-    if remaining_players.len() == 1 && tick > 30 {
-        let _ = lobby
-            .lobby_broadcast
-            .send(WsMessageToClient::WinnerAnnouncement(
-                remaining_players
-                    .iter()
-                    .next()
-                    .expect("no remaining player to win")
-                    .to_string(),
-            ));
-        return Ok(true);
+    println!("aaaaa 1 {} ", nb_active);
+    println!("aaaaa 2 {} ", remaining_players.len());
+    match remaining_players.len() {
+        1 => {
+            let _ = lobby
+                .lobby_broadcast
+                .send(WsMessageToClient::WinnerAnnouncement(
+                    remaining_players
+                        .iter()
+                        .next()
+                        .expect("no remaining player to win")
+                        .to_string(),
+                ));
+            Ok(true)
+        }
+        0 => {
+            let _ = lobby
+                .lobby_broadcast
+                .send(WsMessageToClient::WinnerAnnouncement("".to_string())); // todo : handle with none
+            Ok(true)
+        }
+        _ if nb_active == 0 => Ok(true), // player still occupying some tiles, but nobody is active
+        _ => Ok(false),
     }
-
-    Ok(false)
 }
 
 pub fn end_lobby_game(lobby: &mut Lobby, state: Arc<configs::app_state::AppState>) {
@@ -326,6 +346,7 @@ pub fn end_lobby_game(lobby: &mut Lobby, state: Arc<configs::app_state::AppState
     lobby.generate_new_board();
     lobby.status = LobbyStatus::AwaitingPlayers;
     lobby.players = HashMap::new();
+    lobby.tick = 0;
 }
 
 pub fn pick_available_starting_coordinates(board: &Vec<Vec<Tile>>) -> (usize, usize) {

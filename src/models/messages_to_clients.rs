@@ -81,12 +81,12 @@ impl WsMessageToClient {
 #[derive(Debug, Clone, Serialize)]
 pub struct LobbiesGeneralUpdate {
     pub lobbies: Vec<LobbyGeneralUpdate>,
-    pub total_players_connected: usize,
+    pub connected_players: Vec<(String, Option<usize>)>, // (name,in lobby)
 }
 #[derive(Debug, Clone, Serialize)]
 pub struct LobbyGeneralUpdate {
     pub player_capacity: usize,
-    pub nb_connected: usize,
+    pub player_names: Vec<String>,
     pub status: LobbyStatus,
     pub next_starting_time: i64, // unix timestamp seconds
 }
@@ -96,6 +96,7 @@ pub struct GameUpdate {
     pub board_game: Vec<Vec<TileUpdate>>,
     pub score_board: HashMap<String, PlayerScore>,
     pub moves: PlayerMoves,
+    pub tick: usize,
 }
 #[derive(Debug, Clone, Serialize)]
 pub struct TileUpdate {

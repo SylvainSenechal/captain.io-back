@@ -31,6 +31,7 @@ pub struct AppState {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ChatMessage {
+    pub poster: String,
     pub message: String,
 }
 
@@ -44,6 +45,7 @@ pub struct Lobby {
     pub players: HashMap<String, String>, // uuid->name
     pub messages: Vec<ChatMessage>,
     pub board_game: Vec<Vec<Tile>>,
+    pub tick: usize,
 }
 
 #[derive(Debug, Copy, Clone, Serialize, PartialEq, Eq)]
@@ -95,6 +97,7 @@ impl Lobby {
             players: HashMap::new(),
             messages: vec![],
             board_game: vec![],
+            tick: 0,
         };
         lobby.generate_new_board();
         lobby
@@ -138,9 +141,10 @@ impl AppState {
             .expect("couldn't create pool");
         let lobbies: [RwLock<Lobby>; constants::NB_LOBBIES] = [
             RwLock::new(Lobby::new(0, 2)),
-            RwLock::new(Lobby::new(1, 3)),
-            RwLock::new(Lobby::new(2, 1)),
-            RwLock::new(Lobby::new(3, 4)),
+            RwLock::new(Lobby::new(1, 2)),
+            RwLock::new(Lobby::new(2, 2)),
+            RwLock::new(Lobby::new(3, 3)),
+            RwLock::new(Lobby::new(4, 5)),
         ];
         Arc::new(AppState {
             connection: pool,

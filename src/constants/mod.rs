@@ -1,5 +1,5 @@
 pub const DATABASE_NAME: &str = "game.db";
-pub const NB_LOBBIES: usize = 4;
+pub const NB_LOBBIES: usize = 5;
 pub const DELAY_FOR_GAMESTART_SEC: i64 = 3;
 pub const MINIMUM_PLAYERNAME_LENGTH: usize = 3;
 pub const MAXIMUM_PLAYERNAME_LENGTH: usize = 18;

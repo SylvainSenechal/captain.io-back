@@ -293,9 +293,10 @@ async fn receive(
                                 .write()
                                 .expect("failed to lock global chat")
                                 .push(ChatMessage {
+                                    poster: player_name.clone(),
                                     message: message.clone(),
                                 });
-                            global_chat_new_message(state.clone(), message);
+                            global_chat_new_message(state.clone(), message, player_name.clone());
                         }
                         ClientCommand::SendLobbyMessage(message) => {
                             if let Some(lobby_player) = state
@@ -312,6 +313,7 @@ async fn receive(
                                     .expect("failed ot lock lobby")
                                     .messages
                                     .push(ChatMessage {
+                                        poster: player_name.clone(),
                                         message: message.clone(),
                                     });
                                 state.lobbies[lobby_player]
@@ -319,6 +321,7 @@ async fn receive(
                                     .unwrap()
                                     .lobby_broadcast
                                     .send(WsMessageToClient::LobbyChatNewMessage(ChatMessage {
+                                        poster: player_name.clone(),
                                         message,
                                     }))
                                     .expect("failed to notify of new lobby message");
@@ -337,7 +340,13 @@ async fn receive(
 
 pub fn global_lobbies_update(state: Arc<configs::app_state::AppState>) {
     let mut update: LobbiesGeneralUpdate = LobbiesGeneralUpdate {
-        total_players_connected: state.players.read().expect("failed to lock players").len(),
+        connected_players: state
+            .players
+            .read()
+            .expect("failed to read")
+            .values()
+            .map(|player| (player.name.clone(), player.playing_in_lobby))
+            .collect(),
         lobbies: vec![],
     };
 
@@ -345,7 +354,7 @@ pub fn global_lobbies_update(state: Arc<configs::app_state::AppState>) {
         let lobby = lob.read().expect("failed to lock lobby");
         update.lobbies.push(LobbyGeneralUpdate {
             player_capacity: lobby.player_capacity,
-            nb_connected: lobby.players.len(),
+            player_names: lobby.players.values().cloned().collect(),
             status: lobby.status,
             next_starting_time: lobby.next_starting_time,
         });
@@ -381,10 +390,16 @@ fn global_chat_sync(
         ))
         .expect("global chat sync failed");
 }
-fn global_chat_new_message(state: Arc<configs::app_state::AppState>, message: String) {
+fn global_chat_new_message(
+    // todo : review usefullness of this function
+    state: Arc<configs::app_state::AppState>,
+    message: String,
+    poster: String,
+) {
     state
         .global_broadcast
         .send(WsMessageToClient::GlobalChatNewMessage(ChatMessage {
+            poster,
             message,
         }))
         .expect("global chat new message failed");
